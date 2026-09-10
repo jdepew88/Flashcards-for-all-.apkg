@@ -1,35 +1,48 @@
-// Adapted from CCNA Practice Labs — src/components/flashcards/flashcard-viewer.tsx.
+// The study screen.
 //
-// Behavior kept identical: chapter filter, hide-known, shuffle, tap-to-reveal,
-// double-tap to flip back, horizontal swipe to move, arrow keys, space/enter to
-// flip, swipe-up (or ArrowUp) for the options sheet, per-card "known" marking,
-// progress bar and counter.
+// Started as CCNA Practice Labs' src/components/flashcards/flashcard-viewer.tsx.
+// The study model is unchanged — chapter filter, hide-known, shuffle, restart,
+// per-card "known" marks, reading options, progress — and so is what progress
+// means. The screen around it was redesigned:
 //
-// Adaptations for the standalone build:
-//   * `useRouter()` is replaced by an `onExit` callback — this app has no
-//     Next.js router, and "exit" here means "go back to the upload screen".
-//   * Explicit Previous / Next / Restart controls were added. On the CCNA site
-//     the only way forward on a desktop was an arrow key, which is not
-//     discoverable for someone handed a bare link with no instructions.
-//   * "Reset progress" in the options sheet clears this deck's known marks.
-//   * The key handler ignores events originating in a form control, so the
-//     chapter <select> keeps its normal keyboard behavior.
+//   * One focused column: a compact header, a slim progress line, the card as
+//     the hero, and the controls. Filters and settings live in one Study
+//     options sheet instead of a toolbar above the card.
+//   * Controls adapt to the layout (never to a user-agent string):
+//       phone-sized  → gestures by default, Previous/Flip/Next buttons optional
+//       larger       → buttons always; gestures still work on the card
+//     In gesture mode the buttons stay in the accessibility tree and appear
+//     when keyboard focus reaches them, so gestures are never the only way.
+//   * Tap flips (immediately — the old 400ms double-tap wait is gone), swipes
+//     navigate with the card following the finger. See swipe-card.tsx.
+//   * Keyboard: ← → move, Space / Enter / ↑ / ↓ flip, K marks known. Keys are
+//     left alone while a form control, player or dialog has them, and whenever
+//     a modifier is held (Alt+← is the browser's Back).
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion, type PanInfo } from "framer-motion";
-import { Check, ChevronLeft, ChevronRight, ChevronUp, RotateCcw, Shuffle } from "lucide-react";
-import { Badge } from "@/components/ui/primitives";
-import { cn } from "@/lib/utils";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  SlidersHorizontal,
+} from "lucide-react";
+import { Button } from "@/components/ui/primitives";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { SwipeCard, type CardMotion } from "@/components/swipe-card";
+import { FlashcardOptionsSheet } from "@/components/flashcard-options-sheet";
 import { useFlashcardsStore } from "@/lib/stores/known-store";
 import { useFlashcardPrefsStore } from "@/lib/stores/prefs-store";
 import { FLASHCARD_FONTS } from "@/lib/fonts";
-import { FlashcardOptionsSheet } from "@/components/flashcard-options-sheet";
-import { sanitizeCardHtml } from "@/lib/flashcards/sanitize";
+import {
+  COMPACT_QUERY,
+  FINE_POINTER_QUERY,
+  useMediaQuery,
+  usePrefersReducedMotion,
+} from "@/lib/use-media-query";
 import type { Flashcard, FlashcardDeck } from "@/lib/flashcards/types";
-
-const TAP_MAX_DISTANCE = 10;
-const SWIPE_THRESHOLD = 70;
-const DOUBLE_TAP_WINDOW_MS = 400;
 
 function shuffleArray<T>(items: T[]): T[] {
   const arr = [...items];
@@ -40,11 +53,17 @@ function shuffleArray<T>(items: T[]): T[] {
   return arr;
 }
 
-function isFormControl(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return (
-    target.isContentEditable || ["INPUT", "SELECT", "TEXTAREA", "OPTION"].includes(target.tagName)
+/** While one of these has focus, keys are theirs, not the study screen's. */
+function ownsKeyboard(target: Element): boolean {
+  return !!target.closest(
+    "input, select, textarea, option, audio, video, [contenteditable], [role='slider'], [role='radiogroup'], [role='menu'], [role='listbox'], [role='tablist'], [role='dialog'], [role='alertdialog']"
   );
+}
+
+interface Toast {
+  id: number;
+  message: string;
+  restart?: boolean;
 }
 
 export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit: () => void }) {
@@ -54,12 +73,25 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const [shuffleNonce, setShuffleNonce] = useState(0);
   const [position, setPosition] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [direction, setDirection] = useState<-1 | 0 | 1>(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const [toast, setToast] = useState<Toast | null>(null);
+  const [cardWidth, setCardWidth] = useState(0);
+  const stageRef = useRef<HTMLDivElement>(null);
+
+  const compact = useMediaQuery(COMPACT_QUERY);
+  const finePointer = useMediaQuery(FINE_POINTER_QUERY);
+  const reduced = usePrefersReducedMotion();
 
   const font = useFlashcardPrefsStore((s) => s.font);
   const fontSize = useFlashcardPrefsStore((s) => s.fontSize);
   const setFont = useFlashcardPrefsStore((s) => s.setFont);
   const setFontSize = useFlashcardPrefsStore((s) => s.setFontSize);
+  const controlMode = useFlashcardPrefsStore((s) => s.controlMode);
+  const setControlMode = useFlashcardPrefsStore((s) => s.setControlMode);
+  const gestureHintSeen = useFlashcardPrefsStore((s) => s.gestureHintSeen);
+  const markGestureHintSeen = useFlashcardPrefsStore((s) => s.markGestureHintSeen);
   const fontFamily =
     FLASHCARD_FONTS.find((f) => f.id === font)?.variable ?? FLASHCARD_FONTS[0].variable;
 
@@ -94,392 +126,444 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setLastOrder(order);
     setPosition(0);
     setFlipped(false);
+    setDirection(0);
   }
 
   const total = order.length;
   const currentIndex = order[position];
   const currentCard: Flashcard | null = currentIndex !== undefined ? deck.cards[currentIndex] : null;
   const isKnownCurrent = currentCard ? knownSet.has(currentCard.id) : false;
+  const remaining = total - position - 1;
 
-  const lastTapAtRef = useRef(0);
-  const pendingTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showButtons = !compact || controlMode === "buttons";
+  const showHint = compact && controlMode === "gestures" && !gestureHintSeen && currentCard !== null;
+  const showShortcutHint = finePointer && !compact;
 
+  const motionCustom = useMemo<CardMotion>(
+    () => ({ direction, width: cardWidth, reduced }),
+    [direction, cardWidth, reduced]
+  );
+
+  // The study screen is a fixed-height app shell; while it is up, the page
+  // must not scroll or overscroll (pull-to-refresh, horizontal history swipes).
   useEffect(() => {
-    return () => {
-      if (pendingTapTimer.current) clearTimeout(pendingTapTimer.current);
-    };
+    const root = document.documentElement;
+    root.classList.add("study-mode");
+    return () => root.classList.remove("study-mode");
   }, []);
 
-  function goTo(next: number) {
-    if (next < 0 || next >= total) return;
+  useLayoutEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const update = () => setCardWidth(el.clientWidth);
+    update();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 2800);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  function go(step: 1 | -1) {
+    const next = position + step;
+    if (next < 0 || next >= total) {
+      if (total > 0) {
+        setToast({
+          id: Date.now(),
+          message: step > 0 ? "That's the last card." : "This is the first card.",
+          restart: step > 0 && total > 1,
+        });
+      }
+      return;
+    }
+    setDirection(step);
     setPosition(next);
     setFlipped(false);
+    setAnnouncement(`Card ${next + 1} of ${total}`);
   }
 
-  function handleRestart() {
+  function flip() {
+    if (!currentCard) return;
+    const next = !flipped;
+    setFlipped(next);
+    setAnnouncement(next ? "Showing answer" : "Showing question");
+  }
+
+  function toggleKnown() {
+    if (!currentCard) return;
+    markKnown(deck.slug, currentCard.id, !isKnownCurrent);
+  }
+
+  function restart() {
+    setDirection(0);
     setPosition(0);
     setFlipped(false);
     if (shuffle) setShuffleNonce((n) => n + 1);
+    if (total > 0) setAnnouncement(`Card 1 of ${total}`);
   }
 
   function handleResetProgress() {
     resetDeck(deck.slug);
     setOptionsOpen(false);
+    setToast({ id: Date.now(), message: "Progress cleared for this deck." });
   }
 
-  function handleTap() {
-    const now = Date.now();
-    const isDoubleTap = now - lastTapAtRef.current < DOUBLE_TAP_WINDOW_MS;
-    lastTapAtRef.current = isDoubleTap ? 0 : now;
-
-    if (isDoubleTap) {
-      if (pendingTapTimer.current) {
-        clearTimeout(pendingTapTimer.current);
-        pendingTapTimer.current = null;
-      }
-      setFlipped(false);
-      return;
-    }
-
-    pendingTapTimer.current = setTimeout(() => {
-      pendingTapTimer.current = null;
-      setFlipped(true);
-    }, DOUBLE_TAP_WINDOW_MS);
+  function clearFilters() {
+    setChapter("all");
+    setHideKnown(false);
   }
 
-  const justDraggedRef = useRef(false);
-
-  function handleCardDragEnd(_event: unknown, info: PanInfo) {
-    const { x } = info.offset;
-    if (Math.abs(x) < TAP_MAX_DISTANCE) return;
-
-    justDraggedRef.current = true;
-    setTimeout(() => {
-      justDraggedRef.current = false;
-    }, 300);
-
-    if (x < -SWIPE_THRESHOLD) goTo(position + 1);
-    else if (x > SWIPE_THRESHOLD) goTo(position - 1);
-  }
-
-  function handleCardClick() {
-    if (justDraggedRef.current) return;
-    handleTap();
-  }
-
-  // Native dblclick as a safety net alongside the timestamp-based double-tap
-  // detection in handleTap — desktop double-clicks fire this reliably even if
-  // the two underlying click events land outside the custom timing window.
-  function handleCardDoubleClick() {
-    if (pendingTapTimer.current) {
-      clearTimeout(pendingTapTimer.current);
-      pendingTapTimer.current = null;
-    }
-    setFlipped(false);
-  }
-
-  function handleHandleDragEnd(_event: unknown, info: PanInfo) {
-    if (info.offset.y < -50) setOptionsOpen(true);
+  function retireHint() {
+    if (showHint) markGestureHintSeen();
   }
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (optionsOpen) {
-        if (event.key === "Escape") setOptionsOpen(false);
-        return;
-      }
-      if (isFormControl(event.target)) return;
-      if (event.key === "ArrowRight") goTo(position + 1);
-      else if (event.key === "ArrowLeft") goTo(position - 1);
-      else if (event.key === "ArrowUp") setOptionsOpen(true);
-      else if (event.key === " " || event.key === "Enter") {
-        event.preventDefault();
-        setFlipped((f) => !f);
+      if (optionsOpen || event.defaultPrevented) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (target && ownsKeyboard(target)) return;
+
+      const onControl = !!target?.closest(
+        "button, a[href], summary, [role='button'], [role='switch'], [role='menuitem']"
+      );
+      const inScrollingCard = !!target?.closest(".card-scroll");
+
+      switch (event.key) {
+        case "ArrowRight":
+          event.preventDefault();
+          go(1);
+          break;
+        case "ArrowLeft":
+          event.preventDefault();
+          go(-1);
+          break;
+        case "ArrowUp":
+        case "ArrowDown":
+          // A focused scrollable card uses these to scroll.
+          if (onControl || inScrollingCard) return;
+          event.preventDefault();
+          flip();
+          break;
+        case " ":
+        case "Enter":
+          // A focused button already acts on Space/Enter; flipping too would double up.
+          if (onControl) return;
+          event.preventDefault();
+          flip();
+          break;
+        case "k":
+        case "K":
+          toggleKnown();
+          break;
+        default:
+          return;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position, total, optionsOpen]);
+  }, [optionsOpen, position, total, flipped, currentCard, isKnownCurrent]);
 
-  function toggleKnown(event: React.MouseEvent) {
-    event.stopPropagation();
-    if (!currentCard) return;
-    markKnown(deck.slug, currentCard.id, !isKnownCurrent);
-  }
+  const chapterName = deck.chapters.find((c) => c.id === chapter)?.name;
+  const filterSummary = [
+    chapter !== "all" ? chapterName : null,
+    shuffle ? "Shuffled" : null,
+    hideKnown ? "Hiding known" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <div className="mx-auto flex min-h-[100dvh] w-full max-w-2xl flex-col px-3 py-3 sm:px-6 sm:py-5">
-      <div className="flex items-center justify-between gap-2 pb-3">
-        <p className="min-w-0 truncate text-sm font-semibold" title={deck.title}>
-          {deck.title}
-        </p>
+    <div className="study-shell mx-auto flex w-full max-w-5xl flex-col">
+      <header className="safe-top mx-auto flex w-full max-w-3xl items-center gap-1 pb-1 sm:gap-2 sm:pb-2">
         <button
+          type="button"
           onClick={onExit}
-          className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-surface-muted"
+          aria-label="Back to your decks"
+          className="-ml-1.5 inline-flex h-10 shrink-0 items-center gap-0.5 rounded-full pl-1.5 pr-2 text-sm font-medium text-muted transition-[background-color,color,transform] duration-150 hover:bg-surface-muted hover:text-foreground active:scale-95 sm:pr-3.5"
         >
-          Load another deck
+          <ChevronLeft className="h-5 w-5" />
+          <span className="hidden sm:inline">Decks</span>
         </button>
-      </div>
 
-      <div className="flex items-center gap-2">
-        <select
-          value={chapter}
-          onChange={(event) => setChapter(event.target.value)}
-          aria-label="Filter by chapter"
-          className="min-w-0 flex-1 truncate rounded-lg border border-border bg-surface-elevated px-3 py-2 text-sm text-foreground"
-        >
-          <option value="all">All chapters ({deck.cards.length})</option>
-          {deck.chapters.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.cardCount})
-            </option>
-          ))}
-        </select>
-        <button
-          onClick={() => setShuffle((s) => !s)}
-          aria-pressed={shuffle}
-          aria-label="Shuffle order"
-          title="Shuffle order"
-          className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors",
-            shuffle
-              ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
-              : "border-border text-muted-foreground hover:bg-surface-muted"
-          )}
-        >
-          <Shuffle className="h-4 w-4" />
-        </button>
-        <button
-          onClick={handleRestart}
-          aria-label="Restart deck"
-          title="Restart from the first card"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-surface-muted"
-        >
-          <RotateCcw className="h-4 w-4" />
-        </button>
-        <button
-          onClick={() => setHideKnown((v) => !v)}
-          aria-pressed={hideKnown}
-          title={hideKnown ? "Showing unknown only" : "Hide known cards"}
-          className={cn(
-            "h-9 shrink-0 rounded-lg border px-2.5 text-xs font-medium transition-colors",
-            hideKnown
-              ? "border-brand-blue bg-brand-blue/10 text-brand-blue"
-              : "border-border text-muted-foreground hover:bg-surface-muted"
-          )}
-        >
-          {hideKnown ? "Hiding known" : "Hide known"}
-        </button>
-      </div>
-
-      <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-        <span data-testid="card-counter">
-          {total > 0 ? position + 1 : 0} / {total}
-        </span>
-        <span>{knownSet.size} known</span>
-      </div>
-      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-surface-muted">
-        <div
-          className="h-full bg-brand-blue transition-all duration-300"
-          style={{ width: total > 0 ? `${((position + 1) / total) * 100}%` : "0%" }}
-        />
-      </div>
-
-      <div
-        className="relative mt-3 min-h-[320px] flex-1 sm:min-h-[420px]"
-        style={{ perspective: 1600 }}
-      >
-        {currentCard ? (
-          <AnimatePresence initial={false} mode="popLayout">
-            <motion.div
-              key={currentCard.id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              drag="x"
-              dragElastic={0.6}
-              dragConstraints={{ left: 0, right: 0 }}
-              onDragEnd={handleCardDragEnd}
-              onClick={handleCardClick}
-              onDoubleClick={handleCardDoubleClick}
-              className="absolute inset-0 cursor-pointer select-none"
-            >
-              <motion.div
-                className="relative h-full w-full"
-                data-testid="card-flipper"
-                data-flipped={flipped}
-                style={{ transformStyle: "preserve-3d" }}
-                animate={{ rotateY: flipped ? 180 : 0 }}
-                transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-              >
-                <div
-                  className="absolute inset-0 flex flex-col overflow-hidden rounded-3xl border border-border bg-surface-elevated shadow-xl"
-                  style={{ backfaceVisibility: "hidden" }}
-                >
-                  <CardFace
-                    label="Question"
-                    chapter={currentCard.chapter}
-                    html={currentCard.front}
-                    fontFamily={fontFamily}
-                    fontSize={fontSize}
-                    known={isKnownCurrent}
-                    onToggleKnown={toggleKnown}
-                  />
-                </div>
-                <div
-                  className="absolute inset-0 flex flex-col overflow-hidden rounded-3xl border border-brand-blue/40 bg-surface-elevated shadow-xl"
-                  style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
-                >
-                  <CardFace
-                    label="Answer"
-                    chapter={currentCard.chapter}
-                    html={currentCard.back}
-                    fontFamily={fontFamily}
-                    fontSize={fontSize}
-                    accent
-                    known={isKnownCurrent}
-                    onToggleKnown={toggleKnown}
-                  />
-                </div>
-              </motion.div>
-            </motion.div>
-          </AnimatePresence>
-        ) : (
-          <div className="flex h-full min-h-[300px] flex-col items-center justify-center gap-4 rounded-3xl border border-dashed border-border p-10 text-center text-muted-foreground">
-            No cards match this filter.
+        <div className="min-w-0 flex-1 px-1 text-center">
+          <h1 className="truncate text-[15px] font-semibold leading-tight" title={deck.title}>
+            {deck.title}
+          </h1>
+          {filterSummary && (
             <button
-              onClick={() => {
-                setChapter("all");
-                setHideKnown(false);
-              }}
-              className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-surface-muted"
+              type="button"
+              onClick={() => setOptionsOpen(true)}
+              className="mx-auto mt-0.5 block max-w-full truncate text-xs font-medium text-accent"
             >
-              Clear filters
+              {filterSummary}
             </button>
+          )}
+        </div>
+
+        <ThemeToggle />
+        <button
+          type="button"
+          onClick={() => setOptionsOpen(true)}
+          aria-label="Study options"
+          aria-haspopup="dialog"
+          aria-expanded={optionsOpen}
+          className="-mr-1.5 inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-2 rounded-full px-2.5 text-sm font-medium text-muted transition-[background-color,color,transform] duration-150 hover:bg-surface-muted hover:text-foreground active:scale-95 sm:mr-0 sm:px-3.5"
+        >
+          <SlidersHorizontal className="h-[18px] w-[18px]" />
+          <span className="hidden sm:inline">Options</span>
+        </button>
+      </header>
+
+      <div className="mx-auto w-full max-w-[40rem] px-1 pt-1">
+        <div
+          role="progressbar"
+          aria-label="Position in deck"
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={total > 0 ? position + 1 : 0}
+          aria-valuetext={total > 0 ? `Card ${position + 1} of ${total}` : "No cards"}
+          className="h-1 w-full overflow-hidden rounded-full bg-surface-muted"
+        >
+          <motion.div
+            className="h-full w-full origin-left rounded-full bg-accent"
+            initial={false}
+            animate={{ scaleX: total > 0 ? (position + 1) / total : 0 }}
+            transition={reduced ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 32 }}
+          />
+        </div>
+      </div>
+
+      <main className="flex min-h-0 flex-1 flex-col items-center justify-center pt-4 sm:pt-6">
+        <div
+          ref={stageRef}
+          className="relative min-h-0 w-full max-w-[40rem] flex-1 sm:max-h-[38rem]"
+        >
+          {/* The rest of the deck, peeking out underneath. */}
+          {currentCard && remaining >= 2 && (
+            <div
+              aria-hidden
+              className="absolute inset-x-5 -bottom-3 top-5 rounded-[1.75rem] border border-card-border bg-card opacity-55"
+            />
+          )}
+          {currentCard && remaining >= 1 && (
+            <div
+              aria-hidden
+              className="absolute inset-x-2.5 -bottom-1.5 top-2.5 rounded-[1.75rem] border border-card-border bg-card shadow-soft"
+            />
+          )}
+
+          {currentCard ? (
+            <AnimatePresence initial={false} custom={motionCustom}>
+              <SwipeCard
+                key={currentCard.id}
+                card={currentCard}
+                motionCustom={motionCustom}
+                flipped={flipped}
+                canGoPrevious={position > 0}
+                canGoNext={position < total - 1}
+                known={isKnownCurrent}
+                fontFamily={fontFamily}
+                fontSize={fontSize}
+                onFlip={flip}
+                onNavigate={go}
+                onEdge={go}
+                onToggleKnown={toggleKnown}
+                onInteract={retireHint}
+              />
+            </AnimatePresence>
+          ) : (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-[1.75rem] border border-dashed border-border-strong p-8 text-center">
+              <p className="text-[15px] font-semibold">No cards match this filter.</p>
+              <p className="max-w-xs text-sm text-muted">
+                {hideKnown
+                  ? "Every card in this selection is marked known."
+                  : "Try a different chapter."}
+              </p>
+              <Button variant="secondary" className="mt-2" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            </div>
+          )}
+
+          <AnimatePresence>
+            {showHint && (
+              <motion.div
+                key="gesture-hint"
+                data-testid="gesture-hint"
+                className="pointer-events-none absolute inset-x-0 bottom-14 z-10 flex justify-center px-4"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0, transition: { delay: 0.35, duration: 0.3 } }}
+                exit={{ opacity: 0, y: 6, transition: { duration: 0.18 } }}
+              >
+                <p className="flex items-center gap-2 rounded-full bg-foreground/90 py-2.5 pl-3 pr-4 text-[13px] font-medium text-background shadow-float">
+                  <ChevronLeft
+                    aria-hidden
+                    className="hint-nudge h-4 w-4"
+                    style={{ "--nudge": "-4px" } as CSSProperties}
+                  />
+                  Swipe to move
+                  <ChevronRight aria-hidden className="hint-nudge -ml-1 h-4 w-4" />
+                  <span aria-hidden className="mx-0.5 h-3.5 w-px bg-background/30" />
+                  Tap to flip
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {showButtons ? (
+          <nav
+            aria-label="Card controls"
+            data-testid="control-bar"
+            className="mt-5 grid w-full max-w-[40rem] grid-cols-[1fr_auto_1fr] items-center gap-2 sm:mt-7 sm:gap-3"
+          >
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => go(-1)}
+              disabled={position <= 0 || !currentCard}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Previous
+            </Button>
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={flip}
+              disabled={!currentCard}
+              className="min-w-[6.5rem] px-6 sm:min-w-32"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Flip
+            </Button>
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => go(1)}
+              disabled={position >= total - 1}
+            >
+              Next
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </nav>
+        ) : (
+          // Gesture mode: no button bar taking space from the card, but the
+          // same actions stay reachable by keyboard and assistive technology,
+          // and become visible the moment one of them has focus.
+          <div
+            role="group"
+            aria-label="Card controls"
+            data-testid="gesture-mode-controls"
+            className="sr-only focus-within:not-sr-only focus-within:mt-4 focus-within:flex focus-within:gap-2"
+          >
+            <Button variant="secondary" size="sm" onClick={() => go(-1)} disabled={position <= 0}>
+              Previous
+            </Button>
+            <Button variant="secondary" size="sm" onClick={flip} disabled={!currentCard}>
+              Flip
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => go(1)}
+              disabled={position >= total - 1}
+            >
+              Next
+            </Button>
           </div>
         )}
-      </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          onClick={() => goTo(position - 1)}
-          disabled={position <= 0}
-          className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-border text-sm font-medium text-foreground transition-colors hover:bg-surface-muted disabled:opacity-40"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          Previous
-        </button>
-        <button
-          onClick={() => setFlipped((f) => !f)}
-          disabled={!currentCard}
-          className="h-11 shrink-0 rounded-xl border border-brand-blue bg-brand-blue/10 px-4 text-sm font-medium text-brand-blue transition-colors hover:bg-brand-blue/20 disabled:opacity-40"
-        >
-          {flipped ? "Question" : "Reveal"}
-        </button>
-        <button
-          onClick={() => goTo(position + 1)}
-          disabled={position >= total - 1}
-          className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-border text-sm font-medium text-foreground transition-colors hover:bg-surface-muted disabled:opacity-40"
-        >
-          Next
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
+        {/* Counts sit with the card and controls, so the group reads as one unit. */}
+        <div className="mt-4 flex min-h-7 items-center justify-center gap-2.5 text-[13px] tabular-nums text-muted sm:mt-5">
+          <span data-testid="card-counter" className="font-semibold text-foreground/80">
+            {total > 0 ? position + 1 : 0} / {total}
+          </span>
+          <span aria-hidden className="h-1 w-1 rounded-full bg-border-strong" />
+          <span>{knownSet.size} known</span>
+          {showShortcutHint && (
+            <span className="ml-4 hidden items-center gap-1.5 md:inline-flex">
+              <kbd className="kbd">←</kbd>
+              <kbd className="kbd">→</kbd>
+              <span className="mr-2">move</span>
+              <kbd className="kbd">Space</kbd>
+              <span>flip</span>
+            </span>
+          )}
+        </div>
+      </main>
 
-      <motion.button
-        drag="y"
-        dragConstraints={{ top: 0, bottom: 0 }}
-        dragElastic={{ top: 0.4, bottom: 0 }}
-        onDragEnd={handleHandleDragEnd}
-        onClick={() => setOptionsOpen(true)}
-        className="mx-auto mt-2 flex touch-none flex-col items-center gap-1 rounded-full px-6 py-2 text-muted-foreground"
-        aria-label="Open reading options"
-      >
-        <ChevronUp className="h-4 w-4" />
-        <span className="text-center text-[11px] leading-tight">
-          Tap for answer &middot; double-tap to flip back &middot; swipe to move &middot; swipe up
-          for options
-        </span>
-      </motion.button>
+      <div aria-hidden className="safe-bottom shrink-0" />
+
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
+
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key={toast.id}
+            role="status"
+            className="fixed inset-x-0 z-30 mx-auto flex w-max max-w-[calc(100%-2rem)] items-center gap-3 rounded-full bg-foreground py-2 pl-4 pr-2 text-sm font-medium text-background shadow-float"
+            style={{ bottom: "calc(max(0.75rem, env(safe-area-inset-bottom)) + 4.25rem)" }}
+            initial={{ opacity: 0, y: 12, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, transition: { duration: 0.15 } }}
+          >
+            <span className="py-1">{toast.message}</span>
+            {toast.restart && (
+              <button
+                type="button"
+                onClick={() => {
+                  restart();
+                  setToast(null);
+                }}
+                className="rounded-full bg-background/15 px-3 py-1 text-sm font-semibold hover:bg-background/25"
+              >
+                Restart
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <FlashcardOptionsSheet
         open={optionsOpen}
         onClose={() => setOptionsOpen(false)}
-        onExit={() => {
+        compact={compact}
+        chapters={deck.chapters}
+        totalCards={deck.cards.length}
+        chapter={chapter}
+        onChapterChange={setChapter}
+        shuffle={shuffle}
+        onShuffleChange={setShuffle}
+        hideKnown={hideKnown}
+        onHideKnownChange={setHideKnown}
+        knownCount={knownSet.size}
+        onRestart={() => {
+          restart();
           setOptionsOpen(false);
-          onExit();
         }}
-        onResetProgress={handleResetProgress}
+        showControlMode={compact}
+        controlMode={controlMode}
+        onControlModeChange={setControlMode}
+        showShortcuts={finePointer}
         font={font}
         onFontChange={setFont}
         fontSize={fontSize}
         onFontSizeChange={setFontSize}
+        onResetProgress={handleResetProgress}
+        onExit={() => {
+          setOptionsOpen(false);
+          onExit();
+        }}
       />
     </div>
-  );
-}
-
-function CardFace({
-  label,
-  chapter,
-  html,
-  accent,
-  fontFamily,
-  fontSize,
-  known,
-  onToggleKnown,
-}: {
-  label: string;
-  chapter: string;
-  html: string;
-  accent?: boolean;
-  fontFamily: string;
-  fontSize: number;
-  known: boolean;
-  onToggleKnown: (event: React.MouseEvent) => void;
-}) {
-  // Sanitized again here, not just at import: a deck stored by an earlier
-  // version of the app was cleaned by that version's rules, and this is the
-  // last point before the HTML reaches the DOM. `allowBareMedia: false`
-  // because bundled media has already been resolved to blob: URLs by now, so
-  // anything still carrying a plain src would be a network request the deck
-  // author chose rather than one the deck's own files justify.
-  const safeHtml = useMemo(
-    () => sanitizeCardHtml(html, { allowBareMedia: false }),
-    [html]
-  );
-
-  return (
-    <>
-      <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5 sm:px-6">
-        <Badge variant={accent ? "success" : "outline"}>{label}</Badge>
-        <span
-          className="mx-2 min-w-0 flex-1 truncate text-center text-[11px] text-muted-foreground"
-          title={chapter}
-        >
-          {chapter}
-        </span>
-        <button
-          onClick={onToggleKnown}
-          aria-pressed={known}
-          aria-label={known ? "Marked as known — tap to unmark" : "Mark as known"}
-          className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors",
-            known
-              ? "border-brand-green bg-brand-green/15 text-brand-green"
-              : "border-border text-muted-foreground hover:bg-surface-muted"
-          )}
-        >
-          <Check className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <div
-        className="anki-card-content flex-1 overflow-y-auto px-5 py-5 leading-relaxed sm:px-8 sm:py-6"
-        style={{ fontFamily, fontSize: `${fontSize}px` }}
-        dangerouslySetInnerHTML={{ __html: safeHtml }}
-      />
-    </>
   );
 }

@@ -1,6 +1,9 @@
 /**
- * The study interface: rendering, reveal/flip, navigation, shuffle, restart,
- * filtering, known-marking and leaving the deck.
+ * The study interface: rendering, flipping, navigation, shuffle, restart,
+ * filtering, known-marking, the options sheet and leaving the deck.
+ *
+ * Touch gestures, the phone control modes, keyboard edge cases and reduced
+ * motion have their own file: study-interactions.test.tsx.
  */
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -8,8 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FlashcardViewer } from "@/components/flashcard-viewer";
 import { useFlashcardsStore } from "@/lib/stores/known-store";
-import { useFlashcardPrefsStore } from "@/lib/stores/prefs-store";
-import { DEFAULT_FONT_SIZE } from "@/lib/stores/prefs-store";
+import { DEFAULT_FONT_SIZE, useFlashcardPrefsStore } from "@/lib/stores/prefs-store";
 import type { FlashcardDeck } from "@/lib/flashcards/types";
 
 const deck: FlashcardDeck = {
@@ -42,10 +44,20 @@ async function settle() {
   await waitFor(() => expect(screen.getAllByTestId("card-flipper")).toHaveLength(1));
 }
 
+async function openOptions(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Study options" }));
+  return screen.findByRole("dialog", { name: "Study options" });
+}
+
 beforeEach(() => {
   localStorage.clear();
   useFlashcardsStore.setState({ knownByDeck: {} });
-  useFlashcardPrefsStore.setState({ font: "sans", fontSize: DEFAULT_FONT_SIZE });
+  useFlashcardPrefsStore.setState({
+    font: "sans",
+    fontSize: DEFAULT_FONT_SIZE,
+    controlMode: "gestures",
+    gestureHintSeen: false,
+  });
 });
 
 afterEach(cleanup);
@@ -76,17 +88,17 @@ describe("rendering", () => {
   });
 });
 
-describe("reveal / flip", () => {
-  it("flips with the Reveal button and back again", async () => {
+describe("flipping", () => {
+  it("flips with the Flip button and back again", async () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
     expect(isFlipped()).toBe(false);
 
-    await user.click(screen.getByRole("button", { name: "Reveal" }));
+    await user.click(screen.getByRole("button", { name: "Flip" }));
     expect(isFlipped()).toBe(true);
 
-    await user.click(screen.getByRole("button", { name: "Question" }));
+    await user.click(screen.getByRole("button", { name: "Flip" }));
     expect(isFlipped()).toBe(false);
   });
 
@@ -104,7 +116,7 @@ describe("reveal / flip", () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
-    await user.click(screen.getByRole("button", { name: "Reveal" }));
+    await user.click(screen.getByRole("button", { name: "Flip" }));
     expect(isFlipped()).toBe(true);
 
     await user.click(screen.getByRole("button", { name: /next/i }));
@@ -160,8 +172,10 @@ describe("navigation", () => {
     expect(counter()).toBe("4 / 4");
   });
 
-  it("leaves the chapter select's own keyboard behavior alone", () => {
+  it("leaves the chapter select's own keyboard behavior alone", async () => {
+    const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    await openOptions(user);
     const select = screen.getByLabelText("Filter by chapter");
 
     select.focus();
@@ -175,16 +189,17 @@ describe("shuffle and restart", () => {
   it("toggles shuffle and keeps every card in the run", async () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
-    const shuffleButton = screen.getByRole("button", { name: "Shuffle order" });
+    await openOptions(user);
+    const shuffleSwitch = screen.getByRole("switch", { name: "Shuffle order" });
 
-    expect(shuffleButton).toHaveAttribute("aria-pressed", "false");
+    expect(shuffleSwitch).toHaveAttribute("aria-checked", "false");
 
-    await user.click(shuffleButton);
-    expect(shuffleButton).toHaveAttribute("aria-pressed", "true");
+    await user.click(shuffleSwitch);
+    expect(shuffleSwitch).toHaveAttribute("aria-checked", "true");
     expect(counter()).toBe("1 / 4");
 
-    await user.click(shuffleButton);
-    expect(shuffleButton).toHaveAttribute("aria-pressed", "false");
+    await user.click(shuffleSwitch);
+    expect(shuffleSwitch).toHaveAttribute("aria-checked", "false");
     expect(screen.getByText("Front one")).toBeInTheDocument();
   });
 
@@ -193,8 +208,9 @@ describe("shuffle and restart", () => {
     const random = vi.spyOn(Math, "random").mockReturnValue(0);
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    await openOptions(user);
 
-    await user.click(screen.getByRole("button", { name: "Shuffle order" }));
+    await user.click(screen.getByRole("switch", { name: "Shuffle order" }));
     await settle();
 
     expect(screen.queryByText("Front one")).not.toBeInTheDocument();
@@ -210,6 +226,7 @@ describe("shuffle and restart", () => {
     await user.click(screen.getByRole("button", { name: /next/i }));
     expect(counter()).toBe("3 / 4");
 
+    await openOptions(user);
     await user.click(screen.getByRole("button", { name: "Restart deck" }));
     await settle();
     expect(counter()).toBe("1 / 4");
@@ -222,6 +239,7 @@ describe("chapter filtering", () => {
   it("narrows the run to one chapter and back", async () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    await openOptions(user);
     const select = screen.getByLabelText("Filter by chapter");
 
     await user.selectOptions(select, "Chapter B");
@@ -232,38 +250,57 @@ describe("chapter filtering", () => {
     expect(counter()).toBe("1 / 4");
   });
 
-  it("lists each chapter with its own card count", () => {
+  it("lists each chapter with its own card count", async () => {
+    const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    await openOptions(user);
     const select = screen.getByLabelText("Filter by chapter");
 
     expect(within(select).getByText("All chapters (4)")).toBeInTheDocument();
     expect(within(select).getByText("Chapter A (3)")).toBeInTheDocument();
     expect(within(select).getByText("Chapter B (1)")).toBeInTheDocument();
   });
+
+  it("shows an active filter under the deck title", async () => {
+    const user = userEvent.setup();
+    render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    await openOptions(user);
+
+    await user.selectOptions(screen.getByLabelText("Filter by chapter"), "Chapter B");
+    await user.click(screen.getByRole("switch", { name: "Shuffle order" }));
+
+    expect(screen.getByRole("button", { name: "Chapter B · Shuffled" })).toBeInTheDocument();
+  });
 });
 
 describe("known tracking", () => {
-  it("marks a card known and counts it", async () => {
+  it("marks a card known and counts it, without flipping the card", async () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
     expect(screen.getByText("0 known")).toBeInTheDocument();
 
-    await user.click(screen.getAllByRole("button", { name: "Mark as known" })[0]);
+    await user.click(screen.getByRole("button", { name: "Mark known" }));
 
     expect(screen.getByText("1 known")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Known" })).toHaveAttribute("aria-pressed", "true");
     expect(useFlashcardsStore.getState().knownByDeck["upload-test-deck"]).toEqual([1]);
+    expect(isFlipped()).toBe(false);
   });
 
   it("hides known cards on request, and offers a way out of an empty filter", async () => {
     const user = userEvent.setup();
     useFlashcardsStore.setState({ knownByDeck: { "upload-test-deck": [1, 2, 3, 4] } });
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    await openOptions(user);
 
-    await user.click(screen.getByRole("button", { name: "Hide known" }));
+    await user.click(screen.getByRole("switch", { name: "Hide known cards" }));
 
     expect(counter()).toBe("0 / 0");
     expect(screen.getByText("No cards match this filter.")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(counter()).toBe("1 / 4");
@@ -276,36 +313,49 @@ describe("known tracking", () => {
 
     expect(screen.getByText("2 known")).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    await user.click(await screen.findByRole("button", { name: /reset progress/i }));
+    await openOptions(user);
+    await user.click(screen.getByRole("button", { name: /reset progress/i }));
 
     expect(screen.getByText("0 known")).toBeInTheDocument();
     expect(useFlashcardsStore.getState().knownByDeck["upload-test-deck"]).toBeUndefined();
   });
 });
 
-describe("reading options", () => {
-  it("opens with ArrowUp, changes text size, and closes with Escape", async () => {
+describe("study options", () => {
+  it("opens from the header, changes text size, and closes with Escape", async () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    expect(await screen.findByRole("dialog", { name: /reading options/i })).toBeInTheDocument();
+    const dialog = await openOptions(user);
+    expect(dialog).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Increase text size" }));
     expect(useFlashcardPrefsStore.getState().fontSize).toBe(DEFAULT_FONT_SIZE + 1);
 
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: /reading options/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole("dialog", { name: "Study options" })).not.toBeInTheDocument()
     );
   });
 
+  it("moves focus into the sheet and back to the button that opened it", async () => {
+    const user = userEvent.setup();
+    render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: "Study options" });
+
+    await openOptions(user);
+    expect(screen.getByRole("button", { name: "Close options" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Close options" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(trigger).toHaveFocus();
+  });
+
   it("does not navigate cards while the sheet is open", async () => {
+    const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    await screen.findByRole("dialog", { name: /reading options/i });
+    await openOptions(user);
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
     expect(counter()).toBe("1 / 4");
@@ -318,7 +368,7 @@ describe("leaving the deck", () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={onExit} />);
 
-    await user.click(screen.getByRole("button", { name: "Load another deck" }));
+    await user.click(screen.getByRole("button", { name: "Back to your decks" }));
 
     expect(onExit).toHaveBeenCalledTimes(1);
   });
@@ -328,8 +378,8 @@ describe("leaving the deck", () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={onExit} />);
 
-    fireEvent.keyDown(window, { key: "ArrowUp" });
-    await user.click(await screen.findByRole("button", { name: /exit study session/i }));
+    await openOptions(user);
+    await user.click(screen.getByRole("button", { name: /exit study session/i }));
 
     expect(onExit).toHaveBeenCalledTimes(1);
   });

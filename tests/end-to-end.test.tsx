@@ -5,8 +5,8 @@
  *
  * This is the test that says "a deck that works in CCNA Practice Labs works
  * here unchanged": it takes the real .apkg off disk, runs the extracted parser
- * over it, and drives the extracted viewer with the result — no hand-built
- * deck object standing in for the parser's output anywhere.
+ * over it, and drives the viewer with the result — no hand-built deck object
+ * standing in for the parser's output anywhere.
  */
 
 import { readFile } from "node:fs/promises";
@@ -42,6 +42,11 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+async function chooseChapter(user: ReturnType<typeof userEvent.setup>, chapter: string) {
+  await user.click(screen.getByRole("button", { name: "Study options" }));
+  await user.selectOptions(await screen.findByLabelText("Filter by chapter"), chapter);
+}
+
 describe("a parsed .apkg drives the study interface", () => {
   it("renders the parsed deck and steps through every card", async () => {
     const user = userEvent.setup();
@@ -62,10 +67,7 @@ describe("a parsed .apkg drives the study interface", () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={parsedDeck} onExit={vi.fn()} />);
 
-    await user.selectOptions(
-      screen.getByLabelText("Filter by chapter"),
-      "Chapter 2 - Cloze Practice"
-    );
+    await chooseChapter(user, "Chapter 2 - Cloze Practice");
 
     expect(screen.getByTestId("card-counter")).toHaveTextContent("1 / 1");
     expect(document.body.innerHTML).toContain("cloze-blank");
@@ -75,10 +77,7 @@ describe("a parsed .apkg drives the study interface", () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={parsedDeck} onExit={vi.fn()} />);
 
-    await user.selectOptions(
-      screen.getByLabelText("Filter by chapter"),
-      "Chapter 1 - Networking Basics"
-    );
+    await chooseChapter(user, "Chapter 1 - Networking Basics");
 
     // The OSI note's front is "What does <b>OSI</b> stand for?" — the <b> must
     // reach the DOM as an element.
@@ -129,7 +128,7 @@ describe("loading a deck, then another one", () => {
     expect(await screen.findByTitle("Deck A")).toBeInTheDocument();
     expect(screen.getByTestId("card-counter")).toHaveTextContent("1 / 6");
 
-    await user.click(screen.getByRole("button", { name: "Load another deck" }));
+    await user.click(screen.getByRole("button", { name: "Back to your decks" }));
     expect(onExit).toHaveBeenCalledTimes(1);
 
     view.rerender(<Screen slug="upload-b" onExit={onExit} />);
@@ -155,7 +154,7 @@ describe("loading a deck, then another one", () => {
 
     expect(await screen.findByText(/couldn't find that deck/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /back to upload/i }));
+    await user.click(screen.getByRole("button", { name: /back to your decks/i }));
     expect(onExit).toHaveBeenCalledTimes(1);
 
     vi.doUnmock("@/lib/flashcards/uploaded-decks");

@@ -75,6 +75,78 @@ interface FlashcardDeck {
 
 ---
 
+## The study experience
+
+The flashcard is the whole point of the study screen, so everything else gets
+out of its way: a compact header (back, deck name, theme, options), a slim
+progress line, the card, and the controls. Chapter filter, shuffle, hide-known,
+restart, reading options and the phone control mode all live in one **Study
+options** sheet — a bottom sheet on phones, a side panel on larger screens.
+
+### Controls by screen size
+
+Chosen from the layout and the pointer, never from a user-agent string
+(`src/lib/use-media-query.ts`). "Phone-sized" means narrower than 640px, or a
+coarse pointer on a screen shorter than 500px (a phone held sideways).
+
+| Layout | Default controls | Also works |
+| --- | --- | --- |
+| Phone-sized | **Gestures** — no button bar, the card gets the space | Buttons mode (Study options → Touch controls), remembered in this browser |
+| Tablet / larger | Previous · Flip · Next buttons | Gestures on the card |
+| Desktop / laptop | Previous · Flip · Next buttons | Keyboard shortcuts (hinted for mouse users), mouse drag |
+
+In gesture mode the Previous / Flip / Next buttons are still in the page for
+keyboard and screen-reader users; they appear as soon as one has focus.
+
+### Gestures
+
+| Gesture | Action |
+| --- | --- |
+| Swipe left | Next card — the card follows the finger, flies out left, the next enters from the right |
+| Swipe right | Previous card — the mirror image |
+| Tap | Flip (immediately; no double-tap wait) |
+| Swipe up or down | Flip — only while the visible face fits; a long card scrolls instead |
+
+The rules live in `src/lib/gestures.ts`. A swipe commits past about a fifth of
+the card's width (64–110px) or on a flick (≥32px at ≥0.45px/ms); anything
+shorter springs back. A tap may include 8px of finger jitter; more than that and
+the click that follows is swallowed, so a swipe never also flips. A movement
+still roughly diagonal after 24px is ignored rather than guessed at, and letting
+go while pulling back toward the start cancels. Swiping past either end of the
+deck rubber-bands and says so, with a Restart action at the end.
+
+The first time someone studies in gesture mode, a small hint ("Swipe to move ·
+Tap to flip") sits on the card until their first gesture, and then never
+returns.
+
+### Keyboard
+
+`←` / `→` move, `Space` (or `Enter`, `↑`, `↓`) flips, `K` marks the card known,
+`Esc` closes a sheet or dialog. Keys are left alone while a form control, media
+player or dialog has focus, Space and Enter are left to a focused button, and
+anything with a modifier held is ignored — `Alt+←` still means Back.
+
+### Light and Dark
+
+Two designed palettes from one set of semantic tokens (`src/styles.css`):
+**Paper & Moss** (warm near-white paper, a bright card, moss-green accent) and
+**Slate & Moss** (deep green-grey slate, the card lifted slightly off the page,
+a softer moss). The sun/moon toggle stores an explicit choice in this browser;
+with no choice the page follows the operating system. `public/theme-init.js`
+applies a stored choice before first paint, so there is no flash of the wrong
+theme — it is a same-origin file rather than inline code, so the CSP needed no
+change. `tests/theme.test.tsx` checks that every token has a value in both
+themes and that every text/background pair meets WCAG AA contrast.
+
+### Motion
+
+The flip is a restrained 3D turn with both faces backface-hidden; navigation
+moves in the direction the card was thrown. With `prefers-reduced-motion:
+reduce`, the flip becomes a short cross-fade, cards fade rather than fly, and
+nothing tilts — every action works the same.
+
+---
+
 ## Architecture: where everything actually happens
 
 ```
@@ -292,30 +364,40 @@ npm install
 npm test
 ```
 
-163 tests across nine files:
+238 tests across twelve files:
 
 | File | Covers |
 | --- | --- |
 | `tests/apkg-parser.test.ts` | The real `.apkg` parses; output matches the CCNA deck schema exactly; chapters, tags, cloze, reversed notes and media; every rejection path (wrong extension, empty file, non-zip, no collection, `anki21b`, empty `col`, no cards, oversized) and the skip-don't-fail behavior for damaged cards |
 | `tests/anki-template.test.ts` | The template renderer, pinned to CCNA Practice Labs' behavior: field substitution, conditionals, cloze blanking and reveal, `{{FrontSide}}`, HTML sanitization, link externalization, media collection and rewriting |
-| `tests/flashcard-viewer.test.tsx` | Rendering, reveal/flip (button, keyboard), previous/next (buttons, arrow keys, bounds), shuffle, restart, chapter filtering, known-marking, hide-known, reset progress, the options sheet, and exiting |
+| `tests/flashcard-viewer.test.tsx` | Rendering, flipping (button, keyboard), previous/next (buttons, arrow keys, bounds), shuffle, restart, chapter filtering and the active-filter summary, known-marking, hide-known, reset progress, the Study options sheet and its focus handling, and exiting |
+| `tests/study-interactions.test.tsx` | Real pointer sequences on the card: tap flips; swipe left/right navigates; vertical swipes flip; small, tentative and diagonal movements do nothing; a swipe never also flips; flipping survives repeated swipes; edges rubber-band and say so; long cards keep vertical movement for scrolling; wide tables keep horizontal drags but still flip on tap; the card's touch-action reaches its own scroll area. Phone gesture mode vs Buttons mode, the one-time hint, persistence of the choice; tablet/desktop controls; keyboard shortcuts and what they leave alone; reduced motion; live announcements and hidden-face semantics |
+| `tests/gestures.test.ts` | The gesture thresholds exactly: axis locking, distance scaling, flicks vs twitches, reversal, edges, vertical flips, rubber-banding, release velocity |
+| `tests/theme.test.tsx` | The pre-paint bootstrap (key contract, stored choice, junk, blocked storage, blocking `<head>` script with no inline code), the toggle and its persistence, the cross-fade, reduced motion, token parity between the two dark declarations, and WCAG AA contrast for every text/background pair in both themes |
 | `tests/end-to-end.test.tsx` | The full chain — real file → parser → viewer — plus loading one deck, leaving it, and loading another |
-| `tests/upload-screen.test.tsx` | Landing copy and privacy statements, import via picker and via drag-and-drop, persistence to real IndexedDB, the deck library for a returning visitor, "download original" built from local bytes, confirmed deletion and delete-all, and every error path a visitor can hit |
+| `tests/upload-screen.test.tsx` | Landing copy and privacy statements, the empty library, import via picker and via drag-and-drop, persistence to real IndexedDB, the deck library for a returning visitor, the ⋯ menu (keyboard included), "download original" built from local bytes, confirmed deletion (Cancel focused) and delete-all, and every error path a visitor can hit |
 | `tests/deck-storage.test.ts` | Browser-local persistence against a real IndexedDB: saving a deck with media and its original file, reopening it without reselecting, exhaustive deletion, delete-all scoped to app-owned keys only, deck isolation, progress removal, and orphan pruning |
 | `tests/sanitize.test.ts` | The security boundary: script elements (including ones hidden by malformed markup), SVG/object/embed/iframe/base/meta/form, event handlers, obfuscated `javascript:` URLs, dangerous `style` declarations, blocked remote media — and that ordinary Anki formatting still renders |
 | `tests/no-upload.test.ts` | That no upload path exists: source-wide scans for request bodies, FormData, `sendBeacon`, sockets, cloud-storage bindings and API routes; that no server code or storage binding is present; and that a full import makes no `fetch` call |
-| `tests/project-config.test.tsx` | Wrangler config validity, the shipped CSP and security headers, package scripts, the responsive class contract, the Anki stylesheet, and the no-phone-home guarantee |
+| `tests/project-config.test.tsx` | Wrangler config validity, the shipped CSP and security headers, package scripts, the responsive and safe-area contract, the Anki stylesheet, and that nothing — source, HTML, CSS, bootstrap script — references another origin |
 
 The Cloudflare configuration is additionally validated for real with
 `npx wrangler deploy --dry-run`.
 
-**Not covered by automated tests:** real-device touch gestures (swipe to move,
-double-tap to flip, swipe up for options) and actual pixel layout — jsdom
-performs no layout and synthesises no touch, so the responsive tests assert only
-the class contract the layout depends on. The gesture handlers are the CCNA
-Practice Labs implementation carried over unchanged, but they have not been
-exercised on a physical device in this repository. Worth ten minutes on a phone
-before you send the link to anyone.
+**Beyond jsdom.** jsdom performs no layout and has no touch pipeline, so the
+production build has also been driven in real Chromium browsers (Edge and
+Chrome, headless) through `wrangler dev`, with the production headers applied
+and touch input injected through the DevTools protocol so the browser runs its
+own touch-action and tap handling. That run covers phone (390×844 and 320×640),
+tablet (768×1024) and desktop (1440×900), light and dark, reduced motion, long
+cards, wide tables and cloze. It is how the one bug jsdom could not see was
+found: the card's scroll area ended the touch-action chain, so the browser
+cancelled every swipe.
+
+**Still not covered:** a physical phone or tablet, and Safari and Firefox.
+Injected touch is the browser's real pipeline, but not a finger on glass — iOS
+Safari in particular has its own edge-swipe and scrolling behaviour. Worth ten
+minutes on an iPhone and an Android phone before you send the link to anyone.
 
 ---
 
@@ -395,6 +477,7 @@ flashcard-deployment/
 ├── FLASHCARD-FORMAT.md            Full file-format reference
 ├── public/
 │   ├── _headers                   CSP + security headers applied by Cloudflare
+│   ├── theme-init.js              Applies a stored Light/Dark choice before first paint
 │   ├── sql-wasm.wasm              SQLite WebAssembly, copied in on install
 │   ├── sample-deck.apkg           Generated sample deck, also the test fixture
 │   └── favicon.svg
@@ -404,16 +487,25 @@ flashcard-deployment/
 ├── src/
 │   ├── main.tsx                   React entry
 │   ├── App.tsx                    Two screens, one hash route
-│   ├── styles.css                 Theme tokens + Anki card normalisation
+│   ├── styles.css                 Light/Dark design tokens + Anki card normalisation
 │   ├── components/
 │   │   ├── upload-screen.tsx      Landing page: import, deck library, privacy
 │   │   ├── study-screen.tsx       Loads a stored deck, resolves its media
-│   │   ├── flashcard-viewer.tsx   The study interface  [extracted]
-│   │   ├── flashcard-options-sheet.tsx  Font / size / reset / exit  [extracted]
+│   │   ├── flashcard-viewer.tsx   The study screen: layout, controls, keyboard  [extracted]
+│   │   ├── swipe-card.tsx         One card: gestures, the flip, both faces
+│   │   ├── flashcard-options-sheet.tsx  Study options sheet / panel  [extracted]
+│   │   ├── theme-toggle.tsx       Light ↔ Dark control
 │   │   └── ui/
-│   │       ├── primitives.tsx     Badge, Button, Card
+│   │       ├── primitives.tsx     Button
+│   │       ├── button-styles.ts   Button variants (theme tokens only)
+│   │       ├── menu.tsx           Overflow (⋯) menu for deck actions
+│   │       ├── logo.tsx           App mark
 │   │       └── confirm-dialog.tsx Confirmation for destructive actions
 │   └── lib/
+│       ├── gestures.ts                Swipe / tap / flick rules, as pure functions
+│       ├── theme.ts                   Theme storage, bootstrap contract, toggle hook
+│       ├── use-media-query.ts         Layout and pointer queries, reduced motion
+│       ├── focus.ts                   Focus trap for sheets and dialogs
 │       ├── flashcards/
 │       │   ├── types.ts               FlashcardDeck contract  [verbatim]
 │       │   ├── anki-template.ts       Anki template renderer  [verbatim]
@@ -456,14 +548,24 @@ Anything that would have dragged the CCNA application along with it:
   a sample deck; and a key handler that ignores events from form controls, so
   the chapter dropdown keeps its normal keyboard behavior.
 
-The study behavior itself — flip, swipe, double-tap, arrow keys, shuffle,
-chapter filter, hide-known, known marks, the reading-options sheet, the progress
-bar — is the CCNA implementation, preserved.
+The study model itself — chapter filter, shuffle, hide-known, known marks,
+reading options, and what progress means — is the CCNA implementation,
+preserved. The interaction layer on top of it was later redesigned (see *The
+study experience*): a tap now flips immediately instead of revealing after a
+double-tap window, swipes follow the finger, the options sheet opens from a
+header button rather than a swipe up, and the filters moved from a toolbar into
+that sheet.
 
 ---
 
 ## Limitations
 
+- **Pinch-zoom does not start on the card while the card fits.** The card sets
+  `touch-action: none` so swipes and vertical flips reach the app rather than
+  the browser; use the text-size option in Study options instead. Long cards
+  switch to `pan-y` and scroll natively, and the rest of the page zooms as
+  normal. Wide tables inside a card scroll sideways under a finger — swipe on
+  the rest of the card to move on.
 - **Per-device, per-browser.** Decks live in that browser's IndexedDB. Nothing
   syncs. Clearing site data removes them, and without granted persistent storage
   the browser may evict them under storage pressure.

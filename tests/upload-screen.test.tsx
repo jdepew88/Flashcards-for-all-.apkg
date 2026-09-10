@@ -68,6 +68,12 @@ async function library() {
   return within(await screen.findByRole("list", { name: "Saved decks" }));
 }
 
+/** Opens a deck's ⋯ menu and picks an item from it. */
+async function deckAction(user: ReturnType<typeof userEvent.setup>, title: string, item: string) {
+  await user.click(screen.getByRole("button", { name: `More actions for ${title}` }));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+}
+
 beforeEach(async () => {
   await deleteAllUploadedDecks();
   deleteAllDeckProgress();
@@ -83,12 +89,11 @@ describe("what the page says", () => {
     render(<UploadScreen onStudy={vi.fn()} />);
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "Flashcard Study Tool" })
+      screen.getByRole("heading", { level: 1, name: "Study any Anki deck, privately." })
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Import a flashcard deck and study it directly in your browser/i)
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Drop a \.apkg file here, or tap to choose one/i)).toBeInTheDocument();
+    expect(screen.getByText(/study it right here in your browser/i)).toBeInTheDocument();
+    // The primary action is the file picker itself, labelled "Import .apkg".
+    expect(screen.getByLabelText(/Import \.apkg/)).toBe(fileInput());
   });
 
   it("states the local-processing promise next to the import control", () => {
@@ -140,6 +145,13 @@ describe("what the page says", () => {
     expect(
       screen.getByText(/Importing a deck never changes the original file on your computer/i)
     ).toBeInTheDocument();
+  });
+
+  it("shows where decks will appear before any are saved", async () => {
+    render(<UploadScreen onStudy={vi.fn()} />);
+
+    expect(await screen.findByText(/Your decks will appear here/i)).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Saved decks" })).toBeNull();
   });
 });
 
@@ -204,10 +216,20 @@ describe("importing a deck", () => {
 
     expect(await screen.findByText("Earlier Deck")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Your decks" })).toBeInTheDocument();
-    expect(screen.getByText(/12 cards · 1 chapters/)).toBeInTheDocument();
+    expect(screen.getByText(/12 cards · 1 chapter\b/)).toBeInTheDocument();
 
     await user.click((await library()).getByRole("button", { name: "Study" }));
     expect(onStudy).toHaveBeenCalledWith("upload-x");
+  });
+
+  it("shows how much of a deck is already known", async () => {
+    await saveUploadedDeck({ deck: deckFixture("upload-x", "Half Known", 4), media: new Map() });
+    useFlashcardsStore.getState().markKnown("upload-x", 1, true);
+    useFlashcardsStore.getState().markKnown("upload-x", 2, true);
+
+    render(<UploadScreen onStudy={vi.fn()} />);
+
+    expect(await screen.findByText(/2 known/)).toBeInTheDocument();
   });
 
   it("offers a download for the original file only when one was retained", async () => {
@@ -218,15 +240,23 @@ describe("importing a deck", () => {
     });
     await saveUploadedDeck({ deck: deckFixture("upload-without", "No Source"), media: new Map() });
 
+    const user = userEvent.setup();
     render(<UploadScreen onStudy={vi.fn()} />);
     await screen.findByText("With Source");
 
+    await user.click(screen.getByRole("button", { name: "More actions for With Source" }));
     expect(
-      screen.getByRole("button", { name: /Download original \.apkg for With Source/i })
+      await screen.findByRole("menuitem", { name: "Download original .apkg" })
     ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "More actions for No Source" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: "Download original .apkg" })).toBeNull();
     expect(
-      screen.queryByRole("button", { name: /Download original \.apkg for No Source/i })
-    ).toBeNull();
+      within(menu).getByRole("menuitem", { name: "Delete from this browser" })
+    ).toBeInTheDocument();
   });
 
   it("builds the download from local bytes without any request", async () => {
@@ -250,7 +280,7 @@ describe("importing a deck", () => {
     const user = userEvent.setup();
     render(<UploadScreen onStudy={vi.fn()} />);
     await screen.findByText("Downloadable");
-    await user.click(screen.getByRole("button", { name: /Download original \.apkg/i }));
+    await deckAction(user, "Downloadable", "Download original .apkg");
 
     await waitFor(() => expect(clicks).toHaveLength(1));
     expect(clicks[0].download).toBe("original-name.apkg");
@@ -272,7 +302,7 @@ describe("deleting from the library", () => {
     render(<UploadScreen onStudy={vi.fn()} />);
     await screen.findByText("CCNA Fundamentals");
 
-    await user.click(screen.getByRole("button", { name: "Delete CCNA Fundamentals" }));
+    await deckAction(user, "CCNA Fundamentals", "Delete from this browser");
 
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveAccessibleName('Delete "CCNA Fundamentals" from this browser?');
@@ -282,6 +312,8 @@ describe("deleting from the library", () => {
     expect(
       within(dialog).getByText(/original \.apkg file on your computer will not be affected/i)
     ).toBeInTheDocument();
+    // The safe choice has focus, so a stray Enter cannot delete anything.
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
 
     // Still there — a confirmation prompt must not have deleted anything yet.
     expect(await listUploadedDecks()).toHaveLength(1);
@@ -293,7 +325,7 @@ describe("deleting from the library", () => {
     render(<UploadScreen onStudy={vi.fn()} />);
     await screen.findByText("Keep Me");
 
-    await user.click(screen.getByRole("button", { name: "Delete Keep Me" }));
+    await deckAction(user, "Keep Me", "Delete from this browser");
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
@@ -313,7 +345,7 @@ describe("deleting from the library", () => {
     render(<UploadScreen onStudy={vi.fn()} />);
     await screen.findByText("Doomed");
 
-    await user.click(screen.getByRole("button", { name: "Delete Doomed" }));
+    await deckAction(user, "Doomed", "Delete from this browser");
     await user.click(await screen.findByRole("button", { name: "Delete deck" }));
 
     await waitFor(async () => expect(await listUploadedDecks()).toHaveLength(0));
@@ -332,7 +364,7 @@ describe("deleting from the library", () => {
     render(<UploadScreen onStudy={vi.fn()} />);
     await screen.findByText("Deck A");
 
-    await user.click(screen.getByRole("button", { name: "Delete Deck A" }));
+    await deckAction(user, "Deck A", "Delete from this browser");
     await user.click(await screen.findByRole("button", { name: "Delete deck" }));
 
     await waitFor(async () => expect(await listUploadedDecks()).toHaveLength(1));
@@ -340,6 +372,33 @@ describe("deleting from the library", () => {
     expect(await loadUploadedDeck("upload-b")).toBeDefined();
     expect(useFlashcardsStore.getState().knownByDeck["upload-b"]).toEqual([3]);
     expect(screen.getByText("Deck B")).toBeInTheDocument();
+  });
+});
+
+describe("the deck menu", () => {
+  it("is operable from the keyboard and closes with Escape", async () => {
+    await saveUploadedDeck({
+      deck: deckFixture("upload-x", "Keyboard Deck"),
+      media: new Map(),
+      source: await sampleFile(),
+    });
+    const user = userEvent.setup();
+    render(<UploadScreen onStudy={vi.fn()} />);
+    await screen.findByText("Keyboard Deck");
+    const trigger = screen.getByRole("button", { name: "More actions for Keyboard Deck" });
+
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const items = within(await screen.findByRole("menu")).getAllByRole("menuitem");
+    expect(items[0]).toHaveFocus();
+
+    await user.keyboard("{ArrowDown}");
+    expect(items[1]).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 });
 

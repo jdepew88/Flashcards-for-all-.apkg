@@ -3,13 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark light" />
-    <title>Flashcard Study Tool</title>
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f3f2ec" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#101412" media="(prefers-color-scheme: dark)" />
+    <title>Flashcards — study Anki decks in your browser</title>
     <meta
       name="description"
-      content="Upload a compatible Anki .apkg flashcard deck and study it directly in your browser. Files are parsed locally and never uploaded to a server."
+      content="Study any compatible Anki .apkg flashcard deck directly in your browser. Decks are opened and saved locally and never uploaded to a server."
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- Applies a remembered light/dark choice before first paint. A file
+         rather than inline code, because the production CSP allows scripts
+         from this origin only. -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

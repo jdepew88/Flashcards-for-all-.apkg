@@ -1,124 +1,512 @@
 @import "tailwindcss";
 
-/* ------------------------------------------------------------------
-   Theme tokens
-   ------------------------------------------------------------------
-   The extracted components use semantic class names (bg-surface-elevated,
-   text-muted-foreground, border-border, text-brand-blue …). Those names are
-   kept so the viewer markup stays recognisably the same as the CCNA original,
-   but the palette here is this tool's own — no course branding.
-   ------------------------------------------------------------------ */
+/* ==========================================================================
+   Flashcards — design tokens and global styles
+   ==========================================================================
 
-@theme {
-  --color-background: #f6f7f9;
-  --color-foreground: #0f172a;
-  --color-surface-elevated: #ffffff;
-  --color-surface-muted: #eef1f5;
-  --color-border: #d8dee7;
-  --color-muted-foreground: #5b6675;
-  --color-brand-blue: #2563eb;
-  --color-brand-green: #16a34a;
-  --color-destructive: #dc2626;
-}
+   Colour lives only in the tokens below. Components use the Tailwind names
+   mapped in `@theme inline` (bg-card, text-muted, border-border, bg-accent …),
+   so a theme is nothing more than a different set of token values.
+
+   Two palettes from one system, same paradigm as Quiz on Demand:
+     Paper & Moss (light) — warm near-white paper, bright card, moss green for
+                            action and selection. Restrained borders and shadow.
+     Slate & Moss (dark)  — deep green-grey slate rather than blue-black, the card
+                            lifted slightly off the page, a softer moss accent.
+
+   The dark palette is declared twice with identical values: once for an
+   explicit choice ([data-theme="dark"]) and once for the operating-system
+   preference when no choice is stored. tests/theme.test.tsx fails if the two
+   ever drift apart, and checks contrast for the pairs text is set on.
+
+   CSP (public/_headers): no web fonts, no external stylesheets. Type is the
+   system stack; icons are bundled SVG.
+   ========================================================================== */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  --background: #f6f7f9;
-  --foreground: #0f172a;
+  --background: #f3f2ec;
+  --surface: #f8f7f2;
   --surface-elevated: #ffffff;
-  --surface-muted: #eef1f5;
-  --border: #d8dee7;
-  --muted-foreground: #5b6675;
-  --brand-blue: #2563eb;
-  --brand-green: #16a34a;
-  --destructive: #dc2626;
+  --surface-muted: #e8e6de;
+  --card: #fffefb;
+  --card-back: #fbfcf7;
+  --card-border: #e0ddd3;
+  --foreground: #1a1d1a;
+  --foreground-muted: #5b615a;
+  --border: #dcd9cf;
+  --border-strong: #c3bfb2;
+  --accent: #3d6b3f;
+  --accent-hover: #335b35;
+  --accent-soft: #e2eadb;
+  --accent-foreground: #ffffff;
+  --success: #2f6b43;
+  --warning: #85570a;
+  --warning-soft: #f6ecd6;
+  --danger: #b42318;
+  --danger-hover: #971c13;
+  --danger-soft: #fbe8e5;
+  --danger-foreground: #ffffff;
+  --focus: #3d6b3f;
+  --backdrop: rgb(22 24 20 / 40%);
+  --hero-glow: rgb(61 107 63 / 12%);
+  --shadow: 0 1px 2px rgb(38 36 28 / 6%), 0 10px 30px -14px rgb(38 36 28 / 22%);
+  --shadow-soft: 0 1px 2px rgb(38 36 28 / 7%);
+  --card-shadow: 0 1px 1px rgb(38 36 28 / 4%), 0 4px 10px -4px rgb(38 36 28 / 8%),
+    0 30px 60px -30px rgb(38 36 28 / 30%);
+  --float-shadow: 0 24px 64px -16px rgb(30 28 20 / 30%);
+
+  --tint-1-bg: #e2eadb;
+  --tint-1-fg: #335b35;
+  --tint-2-bg: #f2e3d8;
+  --tint-2-fg: #8a4a26;
+  --tint-3-bg: #e1e6ec;
+  --tint-3-fg: #3b5068;
+  --tint-4-bg: #f1e8cf;
+  --tint-4-fg: #735610;
+  --tint-5-bg: #ece1ea;
+  --tint-5-fg: #6b3f62;
+
+  --gutter: clamp(0.75rem, 3.5vw, 1.5rem);
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
+/* Slate & Moss (dark) — explicit choice. Keep identical to the block below. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #101412;
+  --surface: #151a17;
+  --surface-elevated: #1c221e;
+  --surface-muted: #242b26;
+  --card: #1a201c;
+  --card-back: #1b231d;
+  --card-border: #2b332d;
+  --foreground: #e7ece6;
+  --foreground-muted: #a1aaa2;
+  --border: #29302b;
+  --border-strong: #3b443d;
+  --accent: #8fbd82;
+  --accent-hover: #a4cb98;
+  --accent-soft: #1f2d21;
+  --accent-foreground: #0f170e;
+  --success: #8fcf99;
+  --warning: #e0b35c;
+  --warning-soft: #332a1a;
+  --danger: #f2877a;
+  --danger-hover: #f6a197;
+  --danger-soft: #34201d;
+  --danger-foreground: #1a0c0a;
+  --focus: #a6d59a;
+  --backdrop: rgb(4 6 5 / 64%);
+  --hero-glow: rgb(143 189 130 / 8%);
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 30px -14px rgb(0 0 0 / 60%);
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 35%);
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 30px 60px -28px rgb(0 0 0 / 70%);
+  --float-shadow: 0 24px 64px -16px rgb(0 0 0 / 70%);
+
+  --tint-1-bg: #223024;
+  --tint-1-fg: #a9cf9c;
+  --tint-2-bg: #35271f;
+  --tint-2-fg: #e3a987;
+  --tint-3-bg: #212a33;
+  --tint-3-fg: #a9bdd3;
+  --tint-4-bg: #332c1c;
+  --tint-4-fg: #dcc07a;
+  --tint-5-bg: #2f2330;
+  --tint-5-fg: #d6a9cd;
+}
+
+/* Slate & Moss (dark) — operating-system preference, when no choice is stored. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0b1017;
-    --foreground: #e7edf5;
-    --surface-elevated: #141b25;
-    --surface-muted: #1d2632;
-    --border: #2a3644;
-    --muted-foreground: #94a3b8;
-    --brand-blue: #60a5fa;
-    --brand-green: #4ade80;
-    --destructive: #f87171;
+  :root:not([data-theme]) {
+    color-scheme: dark;
+
+    --background: #101412;
+    --surface: #151a17;
+    --surface-elevated: #1c221e;
+    --surface-muted: #242b26;
+    --card: #1a201c;
+    --card-back: #1b231d;
+    --card-border: #2b332d;
+    --foreground: #e7ece6;
+    --foreground-muted: #a1aaa2;
+    --border: #29302b;
+    --border-strong: #3b443d;
+    --accent: #8fbd82;
+    --accent-hover: #a4cb98;
+    --accent-soft: #1f2d21;
+    --accent-foreground: #0f170e;
+    --success: #8fcf99;
+    --warning: #e0b35c;
+    --warning-soft: #332a1a;
+    --danger: #f2877a;
+    --danger-hover: #f6a197;
+    --danger-soft: #34201d;
+    --danger-foreground: #1a0c0a;
+    --focus: #a6d59a;
+    --backdrop: rgb(4 6 5 / 64%);
+    --hero-glow: rgb(143 189 130 / 8%);
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 30px -14px rgb(0 0 0 / 60%);
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 35%);
+    --card-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 30px 60px -28px rgb(0 0 0 / 70%);
+    --float-shadow: 0 24px 64px -16px rgb(0 0 0 / 70%);
+
+    --tint-1-bg: #223024;
+    --tint-1-fg: #a9cf9c;
+    --tint-2-bg: #35271f;
+    --tint-2-fg: #e3a987;
+    --tint-3-bg: #212a33;
+    --tint-3-fg: #a9bdd3;
+    --tint-4-bg: #332c1c;
+    --tint-4-fg: #dcc07a;
+    --tint-5-bg: #2f2330;
+    --tint-5-fg: #d6a9cd;
   }
 }
 
 @theme inline {
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
   --color-surface-elevated: var(--surface-elevated);
   --color-surface-muted: var(--surface-muted);
+  --color-card: var(--card);
+  --color-card-back: var(--card-back);
+  --color-card-border: var(--card-border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--foreground-muted);
   --color-border: var(--border);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-brand-blue: var(--brand-blue);
-  --color-brand-green: var(--brand-green);
-  --color-destructive: var(--destructive);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-focus: var(--focus);
+  --color-backdrop: var(--backdrop);
+
+  --shadow-soft: var(--shadow-soft);
+  --shadow-panel: var(--shadow);
+  --shadow-card: var(--card-shadow);
+  --shadow-float: var(--float-shadow);
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
-html,
-body {
-  min-height: 100%;
+/* ---------------------------------------------------------------- base -- */
+
+/* In the base layer so utilities (truncate, touch-none, focus offsets …) win,
+   as they would over Tailwind's own preflight. Unlayered rules would beat
+   every utility regardless of specificity. */
+@layer base {
+  html {
+    background: var(--background);
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  html,
+  body {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  label[for] {
+    cursor: pointer;
+  }
+
+  /* Buttons and small controls should not trigger double-tap zoom on phones. */
+  button,
+  a,
+  label,
+  select,
+  summary {
+    touch-action: manipulation;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
 }
 
-body {
-  margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;
+/* Theme switches cross-fade colours briefly (src/lib/theme.ts adds and removes
+   the class), never on ordinary interactions. */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 280ms var(--ease-out),
+    border-color 280ms var(--ease-out),
+    color 280ms var(--ease-out),
+    fill 280ms var(--ease-out),
+    stroke 280ms var(--ease-out),
+    box-shadow 280ms var(--ease-out) !important;
+}
+
+/* --------------------------------------------------------------- shell -- */
+
+/* The study screen is an app shell: exactly one viewport tall, no page
+   scroll, and no browser overscroll (pull-to-refresh, horizontal history
+   swipes) stealing gestures meant for the card. Set only while studying. */
+html.study-mode,
+html.study-mode body {
+  overscroll-behavior: none;
+  overflow: hidden;
+}
+
+.study-shell {
+  height: 100vh;
+  height: 100dvh;
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+}
+
+.safe-top {
+  padding-top: max(0.375rem, env(safe-area-inset-top));
+}
+
+.safe-bottom {
+  padding-bottom: max(0.625rem, env(safe-area-inset-bottom));
+}
+
+.page-gutter {
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+}
+
+.hero-glow {
+  background: radial-gradient(56rem 20rem at 50% -5rem, var(--hero-glow), transparent 72%);
+}
+
+.kbd {
+  display: inline-flex;
+  min-width: 1.35rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 0.35rem;
+  background: var(--surface-elevated);
+  color: var(--foreground-muted);
+  font: 500 0.6875rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* ---------------------------------------------------------------- card -- */
+
+.flashcard-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* The card's own scroll container. Long cards scroll inside the card — the
+   layout never grows — and a soft fade at the clipped edge says so. */
+.card-scroll {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.card-scroll > .anki-card-content {
+  margin-block: auto;
+}
+
+.card-scroll[data-fade="bottom"] {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 2.5rem), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 2.5rem), transparent);
+}
+
+.card-scroll[data-fade="top"] {
+  -webkit-mask-image: linear-gradient(transparent, #000 2rem);
+  mask-image: linear-gradient(transparent, #000 2rem);
+}
+
+.card-scroll[data-fade="both"] {
+  -webkit-mask-image: linear-gradient(transparent, #000 2rem, #000 calc(100% - 2.5rem), transparent);
+  mask-image: linear-gradient(transparent, #000 2rem, #000 calc(100% - 2.5rem), transparent);
+}
+
+@keyframes hint-nudge {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(var(--nudge, 5px));
+  }
+}
+
+.hint-nudge {
+  animation: hint-nudge 1.6s var(--ease-out) infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+      100deg,
+      transparent 30%,
+      color-mix(in srgb, var(--foreground) 5%, transparent) 50%,
+      transparent 70%
+    )
+    var(--surface-muted);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+details > summary {
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
 }
 
 /* ------------------------------------------------------------------
-   Flashcard viewer — normalizes raw Anki template HTML.
-   Copied from CCNA Practice Labs src/app/globals.css so uploaded decks
-   render identically.
+   Anki card HTML
+   ------------------------------------------------------------------
+   Normalises raw Anki template output. Started from CCNA Practice Labs'
+   globals.css so decks render the same; now centred, as Anki's own default
+   card style is, with lists, tables and code kept left-aligned.
    ------------------------------------------------------------------ */
+
+.anki-card-content {
+  text-align: center;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+}
+
+.anki-card-content > :first-child {
+  margin-top: 0;
+}
+
+.anki-card-content > :last-child {
+  margin-bottom: 0;
+}
 
 .anki-card-content p {
   margin: 0 0 0.75em;
 }
 
+.anki-card-content b,
+.anki-card-content strong {
+  font-weight: 650;
+}
+
+.anki-card-content ul,
+.anki-card-content ol {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0.25em 0 0.75em;
+  padding-left: 1.3em;
+  text-align: left;
+}
+
+.anki-card-content ul {
+  list-style: disc;
+}
+
+.anki-card-content ol {
+  list-style: decimal;
+}
+
+.anki-card-content li + li {
+  margin-top: 0.2em;
+}
+
+.anki-card-content pre {
+  margin: 0.5em 0 0.75em;
+  padding: 0.75em 0.9em;
+  overflow-x: auto;
+  border-radius: 0.6rem;
+  background: var(--surface-muted);
+  font-size: 0.88em;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.anki-card-content code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
 .anki-card-content img {
   display: block;
   max-width: 100%;
-  max-height: 10rem;
+  max-height: min(18rem, 40vh);
   width: auto;
   height: auto;
-  margin: 0.5em auto;
+  margin: 0.6em auto;
   border-radius: 0.5rem;
   object-fit: contain;
 }
 
 .anki-card-content hr {
-  margin: 0.85em 0;
+  width: 100%;
+  margin: 1em 0;
   border: none;
   border-top: 1px solid var(--border);
 }
 
 .anki-card-content a {
-  color: var(--brand-blue);
+  color: var(--accent);
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--brand-blue) 40%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 0.15em;
 }
 
 .anki-card-content .cloze-blank {
-  font-weight: 600;
-  color: var(--brand-blue);
+  font-weight: 650;
+  color: var(--accent);
 }
 
 .anki-card-content .cloze-reveal {
-  font-weight: 600;
-  color: var(--brand-green);
-  background: color-mix(in srgb, var(--brand-green) 15%, transparent);
-  border-radius: 0.25rem;
-  padding: 0 0.2em;
+  font-weight: 650;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0.3rem;
+  padding: 0 0.25em;
 }
 
 .anki-card-content .source {
@@ -126,12 +514,12 @@ body {
   padding-top: 0.5em;
   border-top: 1px dashed var(--border);
   font-size: 0.75rem;
-  color: var(--muted-foreground);
+  color: var(--foreground-muted);
 }
 
 .anki-card-content .source img {
   max-height: 3rem;
-  margin: 0 0 0.35em;
+  margin: 0 auto 0.35em;
 }
 
 .anki-card-content .source-info a {
@@ -139,8 +527,10 @@ body {
 }
 
 .anki-card-content audio.anki-audio {
+  display: block;
   width: 100%;
-  margin: 0.5em 0;
+  max-width: 22rem;
+  margin: 0.5em auto;
 }
 
 /* Left where the sanitizer removed remote or unresolvable media, so a card
@@ -149,34 +539,59 @@ body {
   display: inline-block;
   margin: 0.25em 0;
   padding: 0.1em 0.45em;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--border-strong);
   border-radius: 0.35rem;
   font-size: 0.75em;
-  color: var(--muted-foreground);
+  color: var(--foreground-muted);
   vertical-align: middle;
 }
 
 /* Anki decks commonly ship their own tables; keep them from breaking layout
-   on a phone. */
+   on a phone — a wide table scrolls sideways inside the card. */
 .anki-card-content table {
-  width: 100%;
-  border-collapse: collapse;
   display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0.5em auto 0.75em;
   overflow-x: auto;
+  border-collapse: collapse;
+  text-align: left;
 }
 
 .anki-card-content td,
 .anki-card-content th {
   border: 1px solid var(--border);
-  padding: 0.35em 0.5em;
+  padding: 0.35em 0.6em;
   text-align: left;
+  /* `anywhere` (inherited from the card) would let cells shrink below word
+     width, crushing columns into "Lay/er" instead of letting the table scroll.
+     `break-word` still breaks a monster word, but only as a last resort. */
+  overflow-wrap: break-word;
 }
 
+/* Centred text suits a question or a short answer; paragraphs of it do not.
+   Once a face has to scroll, it reads as a document, left-aligned. */
+.card-scroll:not([data-fade="none"]) > .anki-card-content {
+  text-align: start;
+}
+
+.anki-card-content th {
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------- reduced motion -- */
+
+/* CSS motion is cut to nothing. The card's own transitions run through
+   framer-motion and switch to short opacity fades instead (see
+   src/components/swipe-card.tsx), so state still changes visibly. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

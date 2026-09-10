@@ -10,7 +10,8 @@
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { FlashcardViewer } from "@/components/flashcard-viewer";
 import { UploadScreen } from "@/components/upload-screen";
@@ -92,6 +93,13 @@ describe("security headers", () => {
     expect(csp).not.toMatch(/https?:\/\//);
   });
 
+  it("allows scripts from this origin only — no inline script, no external host", async () => {
+    const csp = (await read("public/_headers")).match(/Content-Security-Policy:([^\n]*)/)![1];
+
+    expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval';");
+    expect(csp).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+  });
+
   it("blocks plugins, framing and base-tag hijacking", async () => {
     const csp = (await read("public/_headers")).match(/Content-Security-Policy:([^\n]*)/)![1];
 
@@ -111,6 +119,8 @@ describe("security headers", () => {
     expect(headers).toMatch(/Permissions-Policy:.*camera=\(\)/);
     expect(headers).toMatch(/Permissions-Policy:.*microphone=\(\)/);
     expect(headers).toMatch(/Permissions-Policy:.*geolocation=\(\)/);
+    expect(headers).toMatch(/Cross-Origin-Opener-Policy:\s*same-origin/);
+    expect(headers).toMatch(/Cross-Origin-Resource-Policy:\s*same-origin/);
     expect(headers).toMatch(/Strict-Transport-Security:\s*max-age=\d+/);
   });
 
@@ -144,39 +154,55 @@ describe("responsive contract", () => {
     expect(html).toMatch(/viewport-fit=cover/);
   });
 
-  it("keeps the study column width-capped with small-screen padding", () => {
+  it("keeps the study screen one viewport tall, with safe-area gutters", async () => {
     const { container } = render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
-    const shell = container.firstElementChild!;
+    const css = await read("src/styles.css");
+    const shell = css.match(/\.study-shell\s*\{([^}]*)\}/)![1];
 
-    expect(shell.className).toContain("max-w-2xl");
-    expect(shell.className).toContain("w-full");
-    // Tight gutters on a phone, roomier from the `sm` breakpoint up.
-    expect(shell.className).toMatch(/\bpx-3\b/);
-    expect(shell.className).toMatch(/\bsm:px-6\b/);
+    expect(container.firstElementChild!.className).toContain("study-shell");
+    expect(shell).toMatch(/height:\s*100dvh/);
+    expect(shell).toMatch(/env\(safe-area-inset-left\)/);
+    expect(shell).toMatch(/env\(safe-area-inset-right\)/);
+    expect(css).toMatch(/\.safe-top\s*\{[^}]*env\(safe-area-inset-top\)/);
+    expect(css).toMatch(/\.safe-bottom\s*\{[^}]*env\(safe-area-inset-bottom\)/);
   });
 
-  it("gives the navigation row flexible buttons and thumb-sized targets", () => {
+  it("caps the card's width so lines stay readable on wide screens", () => {
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
-    const next = screen.getByRole("button", { name: /next/i });
+    const stage = screen.getByTestId("card-surface").parentElement!;
 
-    // h-11 is 44px — the usual minimum comfortable touch target.
-    expect(next.className).toContain("h-11");
-    expect(next.className).toContain("flex-1");
-    expect(next.parentElement!.className).toContain("flex");
+    expect(stage.className).toContain("w-full");
+    expect(stage.className).toContain("max-w-[40rem]");
   });
 
-  it("lets long card content scroll instead of overflowing the card", () => {
+  it("gives the study controls thumb-sized targets", () => {
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    const buttons = within(screen.getByTestId("control-bar")).getAllByRole("button");
+
+    expect(buttons).toHaveLength(3);
+    // h-12 is 48px — comfortably above the usual 44px minimum.
+    for (const button of buttons) expect(button.className).toMatch(/\bh-12\b/);
+  });
+
+  it("lets long card content scroll inside the card instead of growing the layout", async () => {
+    render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    const css = await read("src/styles.css");
 
     for (const face of document.querySelectorAll(".anki-card-content")) {
-      expect(face.className).toContain("overflow-y-auto");
+      expect(face.parentElement!.className).toContain("card-scroll");
+      expect(face.parentElement!.className).toContain("min-h-0");
     }
+    expect(css).toMatch(/\.card-scroll\s*\{[^}]*overflow-y:\s*auto/);
   });
 
-  it("keeps the chapter select from pushing the toolbar wider than the screen", () => {
+  it("keeps the chapter select from pushing the options panel wider than the screen", async () => {
+    const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
-    const select = screen.getByLabelText("Filter by chapter");
 
+    await user.click(screen.getByRole("button", { name: "Study options" }));
+    const select = await screen.findByLabelText("Filter by chapter");
+
+    expect(select.className).toContain("w-full");
     expect(select.className).toContain("min-w-0");
     expect(select.className).toContain("truncate");
   });
@@ -204,6 +230,12 @@ describe("stylesheet", () => {
     // Deck-supplied images must never blow out the card on a narrow screen.
     expect(css).toMatch(/\.anki-card-content img\s*\{[^}]*max-width:\s*100%/);
   });
+
+  it("honours reduced motion", async () => {
+    const css = await read("src/styles.css");
+
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+  });
 });
 
 describe("no phone-home", () => {
@@ -226,5 +258,27 @@ describe("no phone-home", () => {
         /method:\s*["']POST["']/i
       );
     }
+  });
+
+  it("loads no external stylesheet, font, script or image", async () => {
+    // Everything the page itself references, outside src/**/*.ts(x).
+    const files = ["index.html", "src/styles.css", "public/theme-init.js", "public/favicon.svg"];
+
+    for (const relative of files) {
+      const source = (await read(relative))
+        // An SVG's XML namespace is an identifier, not a request.
+        .replaceAll('xmlns="http://www.w3.org/2000/svg"', "");
+      expect(source, `${relative} must not reference another origin`).not.toMatch(/https?:\/\//);
+      expect(source, `${relative} must not reference a protocol-relative URL`).not.toMatch(
+        /["'(]\/\/[a-z0-9]/i
+      );
+    }
+
+    const css = await read("src/styles.css");
+    expect(css).not.toMatch(/@font-face/);
+    // The only import is Tailwind itself, resolved and bundled at build time.
+    expect([...css.matchAll(/@import\s+([^;]+);/g)].map((m) => m[1].trim())).toEqual([
+      '"tailwindcss"',
+    ]);
   });
 });
