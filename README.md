@@ -75,27 +75,185 @@ interface FlashcardDeck {
 
 ---
 
-## Privacy
+## Architecture: where everything actually happens
 
-**Your flashcard file is processed locally in your browser and is not uploaded
-to a server.** This is a statement about the implementation, not a policy:
+```
+Cloudflare
+    |  serves the static application only
+    v
+Your browser
+    |
+    +-- selects a .apkg from your computer
+    +-- reads it locally          (File API)
+    +-- parses it locally         (JSZip + sql.js WebAssembly)
+    +-- sanitizes card content    (allowlist HTML sanitizer)
+    +-- saves the deck locally    (IndexedDB)
+    +-- studies locally
+    +-- deletes it locally
+```
 
-- The site is static assets only. There is no API route, no server-side code, no
-  database and nothing to upload to.
-- `.apkg` files are unzipped and read in the browser, using JSZip and a
-  WebAssembly build of SQLite (`sql.js`).
-- Parsed decks and their media are stored in **IndexedDB** on the visitor's own
-  device, so a deck is still there on the next visit. The delete button on the
-  landing page removes one.
-- Reading preferences and "known" marks live in **localStorage**, on the device.
-- There is no analytics, no tracking, no account, no cloud storage and no
-  third-party request — not even a web font. `tests/project-config.test.tsx`
-  asserts that no source file calls an external URL.
+The website is hosted remotely; the *application code* downloads to the browser
+and does all the work there. Cloudflare serves HTML, CSS, JS, a WebAssembly
+binary and a sample deck — and never receives a deck of yours.
 
-Because everything is per-device, a deck uploaded on your laptop is not on your
-phone, and a link to a study session only works in the browser that has the deck.
+### Your flashcards stay on this device
+
+- **`.apkg` files are never uploaded.** They are opened with the browser's File
+  API, unzipped by JSZip, and read by a WebAssembly build of SQLite (`sql.js`),
+  all in the tab. There is no API route, no Worker script, no database and
+  nothing to upload to — `wrangler.toml` declares static assets and no bindings.
+- **Decks are saved in browser-local storage (IndexedDB)**, so you can close the
+  tab and come back to them. This is persistent structured storage, not an HTTP
+  cache.
+- **This service does not store people's flashcards.** There is no server-side
+  deck storage of any kind — no D1, R2, KV, Durable Object or database.
+- **Local decks can be deleted**, individually or all at once, from the landing
+  page. Deletion is local and exhaustive.
+- **Clearing this site's browser data removes locally saved decks.** So can the
+  browser itself, if the device runs very low on space and persistent storage
+  was not granted. Keep your original `.apkg` files.
+- **Decks do not synchronize between devices, browsers or profiles.** A deck
+  imported on your laptop is not on your phone. There is no account and no sync.
+- **No analytics, no tracking, no third-party requests** — not even a web font.
+
+Two test files exist to keep this honest rather than aspirational:
+`tests/no-upload.test.ts` scans every source file for request bodies, FormData,
+`sendBeacon`, sockets, cloud-storage bindings and API routes, and asserts that
+a full import makes no `fetch` call at all; `tests/project-config.test.tsx`
+asserts the shipped Content-Security-Policy.
+
+### What is stored, and where
+
+| Where | Key | Contents |
+| --- | --- | --- |
+| IndexedDB `flashcard-study-tool` / `uploads` | `meta-list` | The deck library: title, card and chapter counts, import time, original filename and size |
+| | `deck:<slug>` | Parsed, sanitized cards |
+| | `media:<slug>` | Images and audio extracted from the `.apkg` |
+| | `source:<slug>` | The original `.apkg`, byte for byte |
+| localStorage | `flashcards-known-v1` | Which cards you have marked as known |
+| localStorage | `flashcard-prefs-v1` | Reading font and text size |
+
+Binary data is written as raw bytes plus a MIME type rather than as `Blob`
+objects, and rebuilt into Blobs on read — ArrayBuffers are structured-cloneable
+everywhere, while Blob support in IndexedDB has been uneven across engines.
+
+**Why keep the original `.apkg` as well as the parsed deck?** It roughly doubles
+what a deck costs, since the parsed cards are the decompressed form of the same
+content. It buys "Download original .apkg" — so a deck imported here is not lost
+if you misplace your copy — and the ability to re-parse an old deck with a newer
+parser without asking for the file again. Decks whose source exceeds 75 MB skip
+it (`MAX_RETAINED_SOURCE_BYTES`); at that size the parsed deck is what matters.
+
+### Persistent storage
+
+After a successful import the app calls `navigator.storage.persist()`. By
+default an origin's IndexedDB data is "best-effort" and the browser may evict it
+under storage pressure without asking; persistence exempts the origin from that.
+
+The request is entirely advisory. Browsers grant it on their own engagement
+heuristics, several never prompt, and some do not implement it. **The app behaves
+identically whether it is granted, denied or unsupported** — the only difference
+is which sentence the storage section shows the user. It is never presented as a
+guarantee, because it is not one: clearing site data still removes everything.
+
+### Deleting
+
+**Delete one deck** asks for confirmation, then removes that deck's parsed cards,
+extracted media, original `.apkg`, library entry and study progress. Nothing is
+orphaned, and other decks are untouched. The original file on your computer is
+not affected — importing only ever reads it.
+
+**Delete all locally saved decks** does the same for every deck at once, behind
+its own confirmation. It enumerates and deletes only the keys this application
+wrote (`deck:`, `media:`, `source:`, `meta-list`) rather than clearing the object
+store, so unrelated site data is never involved.
+
+The app also prunes orphaned records on load — deck data with no library entry,
+which an import interrupted at the wrong moment could leave behind, and which
+the user would otherwise have no way to delete.
 
 ---
+
+## Security
+
+An imported `.apkg` is content written by whoever made the deck and handed to
+someone who only meant to study it. It is treated as untrusted input throughout.
+
+**The `.apkg` is never parsed on the server**, because there is no server — a
+malicious deck reaches only the browser of the person who chose to open it. That
+does not remove client-side risk, so:
+
+- **Card HTML is rebuilt from an allowlist** (`src/lib/flashcards/sanitize.ts`),
+  parsed with `DOMParser` rather than filtered with regexes. `<script>`,
+  `<style>`, `<iframe>`, `<object>`, `<embed>`, `<svg>`, `<base>`, `<meta>`,
+  `<link>` and form controls are removed with their contents. Unrecognised
+  elements are unwrapped, keeping their text.
+- **Every `on*` attribute is dropped**, whatever its casing or spacing.
+- **`javascript:`, `vbscript:` and `data:` hrefs are neutralised to `#`**,
+  including forms obfuscated with embedded tabs, newlines or NUL bytes.
+- **`style` attributes are filtered** for `url()`, `expression()`, `behavior`,
+  `-moz-binding` and `@import`; ordinary colour and font declarations survive.
+- **Sanitization runs twice** — at import, before anything is stored, and again
+  at render, so a deck saved by an older version is still cleaned by today's
+  rules.
+- Ordinary Anki formatting is deliberately preserved: tables, lists, code
+  blocks, cloze markup, `[sound:]` audio, `class`/`dir`/`lang`/`title`.
+
+`tests/sanitize.test.ts` covers this from both sides — 33 tests that try to get
+script, handlers, plugin content and network requests through, and that check
+real Anki formatting still renders.
+
+### External requests from cards
+
+**Imported cards cannot make network requests.** Remote `http(s)` media is
+stripped at import and replaced with a small `[media blocked]` marker, so a deck
+cannot use an `<img>` to phone home or track when you studied. Only media the
+deck actually bundled is shown, resolved to `blob:` URLs from IndexedDB.
+
+Links to external sites are kept — following one is a deliberate user action —
+but they are forced to `target="_blank" rel="noopener noreferrer"`.
+
+The Content-Security-Policy enforces the same rule independently: `img-src` and
+`media-src` allow only `'self' blob: data:`, and `connect-src` only `'self'`. If
+the sanitizer ever missed a case, the browser would still refuse the request.
+
+### Content-Security-Policy
+
+Shipped in `public/_headers`, which Vite copies into `dist/` and Cloudflare
+applies to every response (the file itself is not served):
+
+```
+default-src 'self'; script-src 'self' 'wasm-unsafe-eval';
+style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:;
+media-src 'self' blob: data:; font-src 'self'; connect-src 'self';
+worker-src 'self' blob:; manifest-src 'self'; object-src 'none';
+frame-src 'none'; child-src 'none'; frame-ancestors 'none';
+base-uri 'self'; form-action 'none'; upgrade-insecure-requests
+```
+
+Alongside it: `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+`X-Frame-Options: DENY`, a `Permissions-Policy` denying camera, microphone,
+geolocation and the rest, `Cross-Origin-Opener-Policy`,
+`Cross-Origin-Resource-Policy` and `Strict-Transport-Security`.
+
+**Two directives need justifying:**
+
+- **`'wasm-unsafe-eval'`** lets sql.js instantiate the SQLite WebAssembly module
+  that reads a deck's collection database. It permits WebAssembly compilation
+  and nothing else — **`'unsafe-eval'` is deliberately not granted**. sql.js was
+  checked for `eval` and `new Function` and contains neither; it calls
+  `WebAssembly.instantiate` only.
+- **`style-src 'unsafe-inline'`** is the one real concession. React writes inline
+  `style` attributes throughout the viewer (font family and size from the
+  reading-options sheet) and framer-motion sets `element.style.transform` every
+  frame to animate the card flip. Both are style *attributes* with values that
+  change at runtime, so neither a hash nor a nonce can express them. The
+  sanitizer compensates: imported cards cannot carry `<style>` elements at all,
+  and their `style` attributes are filtered, so this concession is not reachable
+  from deck content.
+
+No wildcard hosts appear anywhere in the policy, and no external script source is
+permitted.
 
 ## Local setup
 
@@ -133,7 +291,7 @@ npm install
 npm test
 ```
 
-87 tests across six files:
+163 tests across nine files:
 
 | File | Covers |
 | --- | --- |
@@ -141,8 +299,11 @@ npm test
 | `tests/anki-template.test.ts` | The template renderer, pinned to CCNA Practice Labs' behavior: field substitution, conditionals, cloze blanking and reveal, `{{FrontSide}}`, HTML sanitization, link externalization, media collection and rewriting |
 | `tests/flashcard-viewer.test.tsx` | Rendering, reveal/flip (button, keyboard), previous/next (buttons, arrow keys, bounds), shuffle, restart, chapter filtering, known-marking, hide-known, reset progress, the options sheet, and exiting |
 | `tests/end-to-end.test.tsx` | The full chain — real file → parser → viewer — plus loading one deck, leaving it, and loading another |
-| `tests/upload-screen.test.tsx` | Landing copy, the privacy statement, valid upload via picker and via drag-and-drop, the on-device deck list, and every error path a visitor can hit |
-| `tests/project-config.test.tsx` | Wrangler config validity, package scripts, the responsive class contract, the Anki stylesheet, and the no-phone-home guarantee |
+| `tests/upload-screen.test.tsx` | Landing copy and privacy statements, import via picker and via drag-and-drop, persistence to real IndexedDB, the deck library for a returning visitor, "download original" built from local bytes, confirmed deletion and delete-all, and every error path a visitor can hit |
+| `tests/deck-storage.test.ts` | Browser-local persistence against a real IndexedDB: saving a deck with media and its original file, reopening it without reselecting, exhaustive deletion, delete-all scoped to app-owned keys only, deck isolation, progress removal, and orphan pruning |
+| `tests/sanitize.test.ts` | The security boundary: script elements (including ones hidden by malformed markup), SVG/object/embed/iframe/base/meta/form, event handlers, obfuscated `javascript:` URLs, dangerous `style` declarations, blocked remote media — and that ordinary Anki formatting still renders |
+| `tests/no-upload.test.ts` | That no upload path exists: source-wide scans for request bodies, FormData, `sendBeacon`, sockets, cloud-storage bindings and API routes; that no server code or storage binding is present; and that a full import makes no `fetch` call |
+| `tests/project-config.test.tsx` | Wrangler config validity, the shipped CSP and security headers, package scripts, the responsive class contract, the Anki stylesheet, and the no-phone-home guarantee |
 
 The Cloudflare configuration is additionally validated for real with
 `npx wrangler deploy --dry-run`.
@@ -232,6 +393,7 @@ flashcard-deployment/
 ├── tsconfig*.json
 ├── FLASHCARD-FORMAT.md            Full file-format reference
 ├── public/
+│   ├── _headers                   CSP + security headers applied by Cloudflare
 │   ├── sql-wasm.wasm              SQLite WebAssembly, copied in on install
 │   ├── sample-deck.apkg           Generated sample deck, also the test fixture
 │   └── favicon.svg
@@ -243,18 +405,22 @@ flashcard-deployment/
 │   ├── App.tsx                    Two screens, one hash route
 │   ├── styles.css                 Theme tokens + Anki card normalisation
 │   ├── components/
-│   │   ├── upload-screen.tsx      Landing page: explain, upload, deck list
+│   │   ├── upload-screen.tsx      Landing page: import, deck library, privacy
 │   │   ├── study-screen.tsx       Loads a stored deck, resolves its media
 │   │   ├── flashcard-viewer.tsx   The study interface  [extracted]
 │   │   ├── flashcard-options-sheet.tsx  Font / size / reset / exit  [extracted]
-│   │   └── ui/primitives.tsx      Badge, Button, Card
+│   │   └── ui/
+│   │       ├── primitives.tsx     Badge, Button, Card
+│   │       └── confirm-dialog.tsx Confirmation for destructive actions
 │   └── lib/
 │       ├── flashcards/
 │       │   ├── types.ts               FlashcardDeck contract  [verbatim]
 │       │   ├── anki-template.ts       Anki template renderer  [verbatim]
 │       │   ├── client-import.ts       .apkg parser  [extracted]
+│       │   ├── sanitize.ts            Allowlist HTML sanitizer
 │       │   ├── resolve-deck-media.ts  Media → blob: URLs  [extracted]
 │       │   └── uploaded-decks.ts      IndexedDB deck storage  [extracted]
+│       ├── storage/persistence.ts     navigator.storage.persist() + quota
 │       ├── stores/                    Zustand state  [extracted]
 │       ├── fonts.ts                   Reading-options font stacks
 │       └── utils.ts
@@ -298,7 +464,17 @@ bar — is the CCNA implementation, preserved.
 ## Limitations
 
 - **Per-device, per-browser.** Decks live in that browser's IndexedDB. Nothing
-  syncs. Clearing site data removes them.
+  syncs. Clearing site data removes them, and without granted persistent storage
+  the browser may evict them under storage pressure.
+- **Remote media in cards is blocked.** Anki bundles media inside the `.apkg`, so
+  this is rare, but a deck that references images by URL will show
+  `[media blocked]` instead. This is deliberate: a remote `<img>` is a tracking
+  pixel that reports when you studied.
+- **Deck-supplied `<style>` blocks are stripped**, along with `style`
+  declarations containing `url()` or `expression()`. Inline colour and font
+  styling survives.
+- **Storing the original `.apkg` roughly doubles a deck's storage cost.** Decks
+  over 75 MB skip it and lose only the "Download original" action.
 - **One deck per file.** Anki subdecks become chapters inside a single deck
   rather than separate decks.
 - **Cloze cards past the first deletion are skipped.** A cloze note with `c1`

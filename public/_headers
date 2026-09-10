@@ -1,0 +1,64 @@
+# Security headers for the deployed static site.
+#
+# Cloudflare Workers static assets reads `_headers` from the assets directory
+# (Vite copies this file from public/ into dist/ at build time) and applies the
+# rules to matching responses. The file itself is never served.
+#
+# ---------------------------------------------------------------------------
+# Content-Security-Policy — why each directive is what it is
+# ---------------------------------------------------------------------------
+#
+# default-src 'self'
+#     Everything not named below is same-origin only. This is the whole point:
+#     an imported .apkg is untrusted content, and nothing it contains should be
+#     able to reach the network.
+#
+# script-src 'self' 'wasm-unsafe-eval'
+#     'wasm-unsafe-eval' permits WebAssembly compilation WITHOUT enabling
+#     eval() or new Function(). sql.js needs it to instantiate the SQLite
+#     module that reads a deck's collection database; it calls
+#     WebAssembly.instantiate and nothing else (verified against
+#     node_modules/sql.js/dist/sql-wasm.js, which contains no eval or
+#     new Function). 'unsafe-eval' is deliberately NOT granted.
+#
+# style-src 'self' 'unsafe-inline'
+#     The one real concession. React writes inline style attributes throughout
+#     the viewer (font family and size from the reading-options sheet), and
+#     framer-motion animates the card flip by setting element.style.transform
+#     every frame. Both are style *attributes*, which CSP governs through
+#     style-src / style-src-attr, and neither can be expressed as a hash or
+#     nonce because the values change at runtime. Sanitization compensates:
+#     imported cards cannot carry <style> elements at all, and their style
+#     attributes are filtered for url(), expression() and @import, so this
+#     concession is not reachable from deck content.
+#
+# img-src / media-src 'self' blob: data:
+#     Media bundled inside a .apkg is extracted to blob: URLs. data: covers
+#     inline images. Remote http(s) media is absent by design — the sanitizer
+#     strips it, and its absence here means the CSP enforces that even if the
+#     sanitizer ever missed a case.
+#
+# connect-src 'self'
+#     Only two fetches exist: /sql-wasm.wasm and /sample-deck.apkg, both static
+#     assets of this site. No deck data is ever sent anywhere.
+#
+# object-src 'none' / frame-src 'none' / frame-ancestors 'none'
+#     No plugins, no nested browsing contexts, and this page may not be framed.
+#
+# base-uri 'self' / form-action 'none'
+#     A <base> tag cannot be used to re-point relative URLs, and there is no
+#     form on the site to submit anywhere.
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob: data:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; frame-src 'none'; child-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# Fingerprinted build assets are immutable.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

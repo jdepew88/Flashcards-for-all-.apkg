@@ -3,7 +3,7 @@
 // the standalone app does not pull in Radix, class-variance-authority and the
 // rest of the CCNA design system for three small elements.
 
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, Ref } from "react";
 import { cn } from "@/lib/utils";
 
 type BadgeVariant = "default" | "outline" | "success";
@@ -56,13 +56,18 @@ export function Button({
   size = "default",
   className,
   children,
+  ref,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  // React 19 passes ref as an ordinary prop to function components, so no
+  // forwardRef wrapper is needed — it just has to be declared.
+  ref?: Ref<HTMLButtonElement>;
 }) {
   return (
     <button
+      ref={ref}
       {...props}
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors",

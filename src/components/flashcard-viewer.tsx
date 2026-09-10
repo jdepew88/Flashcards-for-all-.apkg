@@ -24,6 +24,7 @@ import { useFlashcardsStore } from "@/lib/stores/known-store";
 import { useFlashcardPrefsStore } from "@/lib/stores/prefs-store";
 import { FLASHCARD_FONTS } from "@/lib/fonts";
 import { FlashcardOptionsSheet } from "@/components/flashcard-options-sheet";
+import { sanitizeCardHtml } from "@/lib/flashcards/sanitize";
 import type { Flashcard, FlashcardDeck } from "@/lib/flashcards/types";
 
 const TAP_MAX_DISTANCE = 10;
@@ -439,6 +440,17 @@ function CardFace({
   known: boolean;
   onToggleKnown: (event: React.MouseEvent) => void;
 }) {
+  // Sanitized again here, not just at import: a deck stored by an earlier
+  // version of the app was cleaned by that version's rules, and this is the
+  // last point before the HTML reaches the DOM. `allowBareMedia: false`
+  // because bundled media has already been resolved to blob: URLs by now, so
+  // anything still carrying a plain src would be a network request the deck
+  // author chose rather than one the deck's own files justify.
+  const safeHtml = useMemo(
+    () => sanitizeCardHtml(html, { allowBareMedia: false }),
+    [html]
+  );
+
   return (
     <>
       <div className="flex items-center justify-between border-b border-border/60 px-4 py-2.5 sm:px-6">
@@ -466,7 +478,7 @@ function CardFace({
       <div
         className="anki-card-content flex-1 overflow-y-auto px-5 py-5 leading-relaxed sm:px-8 sm:py-6"
         style={{ fontFamily, fontSize: `${fontSize}px` }}
-        dangerouslySetInnerHTML={{ __html: html }}
+        dangerouslySetInnerHTML={{ __html: safeHtml }}
       />
     </>
   );

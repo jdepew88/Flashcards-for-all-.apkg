@@ -6,6 +6,9 @@
 //   2. The sql.js wasm URL is injectable instead of hard-coded to
 //      "/sql-wasm.wasm", so Node-based tests can point at node_modules. The
 //      default is the same "/sql-wasm.wasm" the CCNA app uses.
+//   3. Rendered card HTML passes through sanitizeCardHtml() before it is
+//      stored. A .apkg is untrusted input, and the regex pass in
+//      anki-template.ts is a first line, not a boundary. See sanitize.ts.
 // Parsing behavior is otherwise unchanged.
 
 import type { Flashcard, FlashcardChapter, FlashcardDeck } from "./types";
@@ -17,6 +20,7 @@ import {
   sanitizeHtml,
   type AnkiTemplate,
 } from "./anki-template";
+import { sanitizeCardHtml } from "./sanitize";
 
 export interface ParsedApkg {
   deck: FlashcardDeck;
@@ -142,8 +146,16 @@ export async function parseApkgFile(
       });
 
       const { front, back } = renderCard(template, fields, Number(ord));
-      const frontHtml = externalizeLinks(sanitizeHtml(convertSoundTags(front)));
-      const backHtml = externalizeLinks(sanitizeHtml(convertSoundTags(back)));
+      // The allowlist pass runs before media collection, so a source the
+      // sanitizer rejects is never looked up in the archive either.
+      const frontHtml = sanitizeCardHtml(
+        externalizeLinks(sanitizeHtml(convertSoundTags(front))),
+        { allowBareMedia: true }
+      );
+      const backHtml = sanitizeCardHtml(
+        externalizeLinks(sanitizeHtml(convertSoundTags(back))),
+        { allowBareMedia: true }
+      );
 
       collectMediaFilenames(frontHtml, usedMedia);
       collectMediaFilenames(backHtml, usedMedia);

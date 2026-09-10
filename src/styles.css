@@ -143,6 +143,19 @@ body {
   margin: 0.5em 0;
 }
 
+/* Left where the sanitizer removed remote or unresolvable media, so a card
+   reads as "something was here" rather than silently losing content. */
+.anki-card-content .blocked-media {
+  display: inline-block;
+  margin: 0.25em 0;
+  padding: 0.1em 0.45em;
+  border: 1px dashed var(--border);
+  border-radius: 0.35rem;
+  font-size: 0.75em;
+  color: var(--muted-foreground);
+  vertical-align: middle;
+}
+
 /* Anki decks commonly ship their own tables; keep them from breaking layout
    on a phone. */
 .anki-card-content table {

@@ -129,11 +129,17 @@ For each card row:
      hint in the blank
    - Any other `{{filter:Field}}` renders as empty; leftover `{{…}}` is stripped
 3. `[sound:file.mp3]` becomes `<audio controls class="anki-audio" src="file.mp3">`.
-4. The HTML is sanitized: `<script>` and `<iframe>` elements, inline `on*`
-   handlers, and `javascript:` URLs are removed.
+4. The HTML is sanitized twice. First the pass inherited from CCNA Practice Labs
+   removes `<script>` and `<iframe>` elements, inline `on*` handlers and
+   `javascript:` URLs. Then the HTML is re-parsed and rebuilt from an allowlist
+   (`src/lib/flashcards/sanitize.ts`), which additionally removes `<style>`,
+   `<object>`, `<embed>`, `<svg>`, `<base>`, `<meta>`, `<link>` and form
+   controls, filters `style` attributes, and blocks remote media. See
+   [README § Security](./README.md#security).
 5. Absolute `http(s)` links get `target="_blank" rel="noopener noreferrer"`.
 6. Bare `src` filenames on `<img>`/`<audio>` are collected, and the matching
-   media files are extracted from the archive.
+   media files are extracted from the archive. Remote `http(s)` media is
+   replaced with a `[media blocked]` marker rather than fetched.
 
 Card styling from the model (`css`) is **not** applied — cards are rendered with
 this app's own typography, which is what makes the reading-options sheet useful.
@@ -238,6 +244,9 @@ writes notes and cards, adds a media file, and zips the result. Run it with
 | Empty `col` table | Rejected: "This deck's collection table is empty or unreadable." |
 | No renderable cards | Rejected: "No readable cards were found in that deck." |
 | Individual card with a missing note/model/template | Skipped; the rest of the deck imports |
-| Media file referenced but not in the archive | Left as a broken reference; the card still imports |
+| Media file referenced but not in the archive | Shown as a `[media missing]` marker; the card still imports |
+| Media referenced by an `http(s)` URL | Shown as a `[media blocked]` marker; never fetched |
+| `<script>`, `<style>`, `<svg>`, `<object>`, `<embed>`, `<iframe>`, `<form>` | Removed with their contents |
+| Inline `on*` handlers, `javascript:` URLs | Removed / rewritten to `#` |
 | Model `css` styling | Ignored |
 | Scheduling data, review history, deck options | Ignored — this is a study viewer, not a scheduler |

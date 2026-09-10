@@ -1,15 +1,22 @@
-// Landing / upload screen.
+// Landing page: explain the tool, import a deck, and manage the local library.
 //
 // Derived from CCNA Practice Labs' src/components/flashcards/flashcard-upload.tsx
-// (same parser call, same on-device deck list, same error handling) but rebuilt
-// as the whole landing page rather than a card at the bottom of a course page.
-// Added here: a real drag-and-drop target, a format summary, and a sample deck.
+// (same parser call, same on-device deck list, same error handling), rebuilt as
+// the whole landing page rather than a card at the bottom of a course page, and
+// extended with the deck library, confirmed deletion, "download original" and
+// the storage/privacy disclosures.
+//
+// Everything on this screen is local. The only network request it can make is
+// `fetch("/sample-deck.apkg")` for the bundled sample — a static asset of this
+// site, fetched only when the visitor asks for it. No deck data ever leaves.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  Download,
   FileDown,
+  HardDrive,
   Loader2,
   ShieldCheck,
   Trash2,
@@ -17,19 +24,34 @@ import {
   WalletCards,
 } from "lucide-react";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@/components/ui/primitives";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { ApkgParseError, parseApkgFile } from "@/lib/flashcards/client-import";
 import {
+  deleteAllUploadedDecks,
   deleteUploadedDeck,
   listUploadedDecks,
+  loadDeckSource,
+  pruneOrphanedDeckData,
   saveUploadedDeck,
   type UploadedDeckMeta,
 } from "@/lib/flashcards/uploaded-decks";
+import { deleteAllDeckProgress, deleteDeckProgress } from "@/lib/stores/known-store";
+import {
+  formatBytes,
+  readPersistenceState,
+  readStorageEstimate,
+  requestPersistentStorage,
+  type PersistenceState,
+  type StorageEstimate,
+} from "@/lib/storage/persistence";
 
 type Status =
   | { kind: "idle" }
   | { kind: "working"; message: string }
   | { kind: "error"; message: string };
+
+type Pending = { kind: "one"; deck: UploadedDeckMeta } | { kind: "all" } | null;
 
 const SAMPLE_DECK_URL = "/sample-deck.apkg";
 
@@ -38,12 +60,33 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [decks, setDecks] = useState<UploadedDeckMeta[] | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [pending, setPending] = useState<Pending>(null);
+  const [persistence, setPersistence] = useState<PersistenceState>({ status: "unsupported" });
+  const [estimate, setEstimate] = useState<StorageEstimate>({});
+
+  const refreshStorageInfo = useCallback(async () => {
+    setPersistence(await readPersistenceState());
+    setEstimate(await readStorageEstimate());
+  }, []);
 
   useEffect(() => {
-    listUploadedDecks()
-      .then(setDecks)
-      .catch(() => setDecks([]));
-  }, []);
+    let cancelled = false;
+
+    async function load() {
+      // Sweep up any deck data left behind by an import that died between
+      // writing the deck and recording it in the library.
+      await pruneOrphanedDeckData().catch(() => 0);
+      const list = await listUploadedDecks().catch(() => []);
+      if (cancelled) return;
+      setDecks(list);
+      await refreshStorageInfo();
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshStorageInfo]);
 
   async function handleFile(file: File | undefined) {
     if (!file) return;
@@ -52,9 +95,16 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
       const { deck, media } = await parseApkgFile(file, (message) =>
         setStatus({ kind: "working", message })
       );
-      setStatus({ kind: "working", message: "Saving to this device…" });
-      await saveUploadedDeck(deck, media);
+      setStatus({ kind: "working", message: "Saving to this browser…" });
+      await saveUploadedDeck({ deck, media, source: file });
+
+      // Asked for here rather than on page load: this is a genuine user action,
+      // which is when browsers are most willing to grant it — and a denial
+      // changes nothing about what happens next.
+      await requestPersistentStorage().then(setPersistence);
+
       setDecks(await listUploadedDecks());
+      await refreshStorageInfo();
       setStatus({ kind: "idle" });
       onStudy(deck.slug);
     } catch (error) {
@@ -83,9 +133,42 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
     }
   }
 
-  async function handleDelete(slug: string) {
-    await deleteUploadedDeck(slug);
+  async function handleDownloadSource(deck: UploadedDeckMeta) {
+    const blob = await loadDeckSource(deck.slug);
+    if (!blob) {
+      setStatus({
+        kind: "error",
+        message: "The original file for that deck isn't stored in this browser.",
+      });
+      return;
+    }
+
+    // Built from the Blob already in IndexedDB — no request, no server.
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = deck.fileName ?? `${deck.title}.apkg`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function confirmDelete() {
+    if (!pending) return;
+
+    if (pending.kind === "one") {
+      await deleteUploadedDeck(pending.deck.slug);
+      deleteDeckProgress(pending.deck.slug);
+    } else {
+      const removed = await deleteAllUploadedDecks();
+      removed.forEach(deleteDeckProgress);
+      deleteAllDeckProgress();
+    }
+
+    setPending(null);
     setDecks(await listUploadedDecks());
+    await refreshStorageInfo();
   }
 
   function handleDrop(event: React.DragEvent<HTMLLabelElement>) {
@@ -96,6 +179,7 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
   }
 
   const isWorking = status.kind === "working";
+  const usage = formatBytes(estimate.usageBytes);
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 sm:py-16">
@@ -103,25 +187,26 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
         <Badge>Runs entirely in your browser</Badge>
         <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">Flashcard Study Tool</h1>
         <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted-foreground">
-          Upload a compatible flashcard deck and study it directly in your browser. Tap a card to
-          reveal the answer, swipe or use the arrow keys to move between cards, and mark the ones you
-          already know so you can drill down on what is left.
+          Import a flashcard deck and study it directly in your browser. Tap a card to reveal the
+          answer, swipe or use the arrow keys to move between cards, and mark the ones you already
+          know so you can drill down on what is left.
         </p>
       </header>
 
+      {/* ---------------------------------------------------------------- */}
+      {/* Import                                                            */}
+      {/* ---------------------------------------------------------------- */}
       <Card className="mt-8 border-dashed">
         <CardHeader>
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-blue/10 text-brand-blue">
               <Upload className="h-4.5 w-4.5" />
             </span>
-            <CardTitle>Upload a deck</CardTitle>
+            <CardTitle>Import .apkg</CardTitle>
           </div>
           <p className="text-sm text-muted-foreground">
-            Drop in an Anki{" "}
-            <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">.apkg</code> export. It is
-            parsed entirely in your browser and stored only on this device — nothing is uploaded
-            anywhere.
+            Choose an Anki <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">.apkg</code>{" "}
+            export from your computer.
           </p>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -151,9 +236,7 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
                 <span className="text-sm font-medium">
                   Drop a .apkg file here, or tap to choose one
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  Up to 200MB, processed on-device
-                </span>
+                <span className="text-xs text-muted-foreground">Up to 200MB</span>
               </>
             )}
             <input
@@ -166,6 +249,11 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
               onChange={(event) => handleFile(event.target.files?.[0])}
             />
           </label>
+
+          <p className="flex items-center justify-center gap-1.5 text-center text-xs font-medium text-brand-green">
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+            Processed and saved locally in your browser — never uploaded.
+          </p>
 
           {status.kind === "error" && (
             <div
@@ -183,28 +271,41 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
               Try a sample deck
             </Button>
             <span className="text-xs text-muted-foreground">
-              Six cards across three chapters, so you can see how it works before uploading your
+              Six cards across three chapters, so you can see how it works before importing your
               own.
             </span>
           </div>
+        </CardContent>
+      </Card>
 
-          {decks && decks.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                Decks on this device
-              </p>
-              {decks.map((deck) => (
-                <div
-                  key={deck.slug}
-                  className="flex items-center gap-3 rounded-lg border border-border bg-surface-elevated px-3 py-2.5"
-                >
-                  <WalletCards className="h-4 w-4 shrink-0 text-brand-blue" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{deck.title}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {deck.cardCount} cards &middot; {deck.chapterCount} chapters
-                    </p>
-                  </div>
+      {/* ---------------------------------------------------------------- */}
+      {/* Local deck library                                                */}
+      {/* ---------------------------------------------------------------- */}
+      {decks && decks.length > 0 && (
+        <section className="mt-10" aria-labelledby="your-decks">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 id="your-decks" className="text-lg font-semibold tracking-tight">
+              Your decks
+            </h2>
+            <span className="text-xs text-muted-foreground">Saved in this browser</span>
+          </div>
+
+          <ul aria-label="Saved decks" className="mt-3 flex flex-col gap-2">
+            {decks.map((deck) => (
+              <li
+                key={deck.slug}
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-surface-elevated px-3 py-3"
+              >
+                <WalletCards className="h-4 w-4 shrink-0 text-brand-blue" />
+                <div className="min-w-0 flex-1 basis-40">
+                  <p className="truncate text-sm font-medium">{deck.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {deck.cardCount} cards &middot; {deck.chapterCount} chapters
+                    {deck.fileSize !== undefined && ` · ${formatBytes(deck.fileSize)}`}
+                  </p>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-1.5">
                   <button
                     onClick={() => onStudy(deck.slug)}
                     className="inline-flex items-center gap-1 rounded-lg bg-brand-blue px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
@@ -212,34 +313,100 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
                     Study
                     <ArrowRight className="h-3.5 w-3.5" />
                   </button>
+
+                  {deck.hasSource && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground"
+                      aria-label={`Download original .apkg for ${deck.title}`}
+                      title="Download original .apkg"
+                      onClick={() => handleDownloadSource(deck)}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
+                  )}
+
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
                     aria-label={`Delete ${deck.title}`}
-                    onClick={() => handleDelete(deck.slug)}
+                    onClick={() => setPending({ kind: "one", deck })}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              </li>
+            ))}
+          </ul>
 
-      <div className="mt-4 flex items-start gap-2 rounded-xl border border-border bg-surface-elevated px-4 py-3 text-sm text-muted-foreground">
-        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-brand-green" />
-        <p>
-          <strong className="font-medium text-foreground">
-            Your flashcard file is processed locally in your browser and is not uploaded to a server.
-          </strong>{" "}
-          Decks you open are kept in this browser&apos;s storage on this device so you can come back
-          to them, and the delete button removes them. There is no account, no analytics and no
-          backend.
-        </p>
-      </div>
+          <button
+            onClick={() => setPending({ kind: "all" })}
+            className="mt-3 text-xs font-medium text-muted-foreground underline underline-offset-2 hover:text-destructive"
+          >
+            Delete all locally saved decks
+          </button>
+        </section>
+      )}
 
+      {/* ---------------------------------------------------------------- */}
+      {/* Privacy and storage                                               */}
+      {/* ---------------------------------------------------------------- */}
+      <section className="mt-10" aria-labelledby="privacy">
+        <h2 id="privacy" className="text-lg font-semibold tracking-tight">
+          Your flashcards stay on this device
+        </h2>
+        <div className="mt-2 space-y-2 text-sm leading-relaxed text-muted-foreground">
+          <p>
+            Your <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">.apkg</code> deck is
+            opened and processed directly in your browser. It is not uploaded to our servers.
+          </p>
+          <p>
+            Imported decks are saved locally in this browser so you can return to them later. You
+            can delete a saved deck at any time.
+          </p>
+          <p>
+            This site is static files only. There is no account, no analytics, and no server that
+            could receive a deck — the page itself downloads to your browser and does the work
+            there.
+          </p>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-border bg-surface-elevated px-4 py-3">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <HardDrive className="h-4 w-4 shrink-0 text-muted-foreground" />
+            About storage on this device
+          </p>
+          <ul className="mt-2 space-y-1.5 text-sm text-muted-foreground">
+            <li>Saved decks belong to this browser on this device.</li>
+            <li>
+              They will not automatically appear on another computer, phone, browser, or browser
+              profile.
+            </li>
+            <li>Clearing this site&apos;s browser data will remove locally saved decks.</li>
+            {persistence.status === "persisted" && (
+              <li>
+                This browser has granted persistent storage, so it will not evict saved decks on its
+                own to reclaim space. It is not a permanent guarantee — clearing site data still
+                removes them.
+              </li>
+            )}
+            {persistence.status === "best-effort" && (
+              <li>
+                This browser has not granted persistent storage, so it may remove saved decks if the
+                device runs very low on space. Keep your original{" "}
+                <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">.apkg</code> files.
+              </li>
+            )}
+            {usage && <li>This site is currently using about {usage} of browser storage.</li>}
+          </ul>
+        </div>
+      </section>
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Format reference                                                  */}
+      {/* ---------------------------------------------------------------- */}
       <section className="mt-10">
         <h2 className="text-lg font-semibold tracking-tight">Supported file format</h2>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -247,9 +414,8 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
           <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">.apkg</code> extension,
           exported from Anki with <em>File → Export → Anki Deck Package</em>. Both the older{" "}
           <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">collection.anki2</code> and
-          the newer <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">
-            collection.anki21
-          </code>{" "}
+          the newer{" "}
+          <code className="rounded bg-surface-muted px-1 py-0.5 text-xs">collection.anki21</code>{" "}
           layouts are read.
         </p>
         <ul className="mt-3 space-y-1.5 text-sm text-muted-foreground">
@@ -260,15 +426,49 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
           <li>&middot; Anki subdeck names become the chapter filter; note tags are carried across.</li>
           <li>&middot; Images and audio bundled in the deck are extracted and shown on the card.</li>
           <li>
+            &middot; Card content is sanitized on import: scripts, embedded objects and remote media
+            are stripped, so a deck from someone else cannot run code or call out to the network.
+          </li>
+          <li>
             &middot; If Anki offers a &ldquo;Support older Anki versions&rdquo; checkbox on export,
             tick it — the newest compressed export format cannot be read in a browser.
           </li>
         </ul>
         <p className="mt-3 text-sm text-muted-foreground">
-          This is the same format, parsed by the same code, as the flashcard tool on CCNA Practice
-          Labs — any deck that works there works here unchanged.
+          Importing a deck never changes the original file on your computer — it is only read.
         </p>
       </section>
+
+      <ConfirmDialog
+        open={pending !== null}
+        title={
+          pending?.kind === "one"
+            ? `Delete "${pending.deck.title}" from this browser?`
+            : "Delete all locally saved decks?"
+        }
+        confirmLabel={pending?.kind === "one" ? "Delete deck" : "Delete all decks"}
+        onCancel={() => setPending(null)}
+        onConfirm={confirmDelete}
+        body={
+          pending?.kind === "one" ? (
+            <>
+              <p>This removes the locally stored deck and its study progress.</p>
+              <p>The original .apkg file on your computer will not be affected.</p>
+            </>
+          ) : (
+            <>
+              <p>
+                This removes every deck this site has saved in this browser, along with their cards,
+                media and study progress.
+              </p>
+              <p>
+                The original .apkg files on your computer will not be affected, and no other site
+                data is touched.
+              </p>
+            </>
+          )
+        }
+      />
     </div>
   );
 }

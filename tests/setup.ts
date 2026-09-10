@@ -1,3 +1,7 @@
+// jsdom ships no IndexedDB, and the deck library is IndexedDB-backed. This
+// gives the tests a real one so storage behaviour is exercised rather than
+// mocked away.
+import "fake-indexeddb/auto";
 import { MotionGlobalConfig } from "framer-motion";
 import "@testing-library/jest-dom/vitest";
 
