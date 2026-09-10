@@ -1,0 +1,12 @@
+# Flashcards — a static site. Everything a crawler can reach is public: decks
+# are opened in the visitor's browser and never reach this server.
+#
+# Without this file, the single-page-app fallback in wrangler.toml would answer
+# /robots.txt with index.html, which crawlers (and Lighthouse) read as an
+# invalid robots file.
+#
+# Nothing is disallowed on purpose: search engines need the JS and CSS under
+# /assets to render the page.
+
+User-agent: *
+Allow: /

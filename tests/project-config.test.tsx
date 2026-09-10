@@ -134,6 +134,38 @@ describe("security headers", () => {
   });
 });
 
+describe("search engines", () => {
+  it("ships a real robots.txt, so crawlers never get the app shell in its place", async () => {
+    // The SPA fallback answers any missing path with index.html — including
+    // /robots.txt, which Lighthouse then fails as "robots.txt is not valid".
+    const robots = await read("public/robots.txt");
+
+    expect(robots).not.toMatch(/<[a-z!]/i);
+    expect(robots).toMatch(/^User-agent:\s*\*\s*$/m);
+    for (const line of robots.split(/\r?\n/)) {
+      const directive = line.trim();
+      if (!directive || directive.startsWith("#")) continue;
+      expect(directive, `not a robots.txt directive: ${directive}`).toMatch(
+        /^(User-agent|Allow|Disallow|Sitemap):\s*\S+/i
+      );
+    }
+    // Rendering the page needs its JS and CSS, so none of it may be blocked.
+    expect(robots).not.toMatch(/^Disallow:\s*\/\s*$/im);
+    expect(robots).not.toMatch(/^Disallow:\s*\/assets/im);
+  });
+
+  it("describes the page for search results and link previews", async () => {
+    const html = await read("index.html");
+
+    expect(html).toMatch(/<html lang="en">/);
+    expect(html).toMatch(/<title>[^<]{10,}<\/title>/);
+    expect(html).toMatch(/<meta\s+name="description"\s+content="[^"]{50,}"/);
+    expect(html).toMatch(/<meta property="og:title" content="[^"]+"/);
+    expect(html).toMatch(/<meta\s+property="og:description"\s+content="[^"]+"/);
+    expect(html).toMatch(/<meta name="twitter:card" content="summary"/);
+  });
+});
+
 describe("package scripts", () => {
   it("provides the documented commands", async () => {
     const pkg = JSON.parse(await read("package.json"));

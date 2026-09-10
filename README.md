@@ -364,7 +364,7 @@ npm install
 npm test
 ```
 
-238 tests across twelve files:
+240 tests across twelve files:
 
 | File | Covers |
 | --- | --- |
@@ -478,6 +478,7 @@ flashcard-deployment/
 ├── public/
 │   ├── _headers                   CSP + security headers applied by Cloudflare
 │   ├── theme-init.js              Applies a stored Light/Dark choice before first paint
+│   ├── robots.txt                 Real robots file (else the SPA fallback would serve index.html)
 │   ├── sql-wasm.wasm              SQLite WebAssembly, copied in on install
 │   ├── sample-deck.apkg           Generated sample deck, also the test fixture
 │   └── favicon.svg
