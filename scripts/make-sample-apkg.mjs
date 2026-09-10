@@ -20,17 +20,62 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import initSqlJs from "sql.js";
 import JSZip from "jszip";
+import { deflateSync } from "node:zlib";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const wasmPath = resolve(root, "node_modules/sql.js/dist/sql-wasm.wasm");
 const outPath = resolve(root, "public/sample-deck.apkg");
 
-// A 24x24 blue square PNG, so a card in the sample deck carries real media.
-const DIAGRAM_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAYAAADgdz34AAAAPElEQVR42u3NMQEAAAgDoJnc6BpjDyQg" +
-    "d1XNzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozr4NHhkAAY0d5DoAAAAASUVORK5CYII=",
-  "base64"
-);
+// A small point-to-point diagram — two nodes joined by a link — so a card in
+// the sample deck carries real media. Encoded here rather than pasted in as
+// base64: an earlier hand-written PNG had a corrupt IDAT, which browsers
+// "load" at full size but paint as fully transparent.
+const DIAGRAM_PNG = encodePng(64, 32, (x, y) => {
+  const node = (cx) => (x - cx) ** 2 + (y - 16) ** 2 <= 64;
+  if (node(10) || node(54)) return [37, 99, 235, 255];
+  if (x > 10 && x < 54 && (y === 15 || y === 16)) return [71, 85, 105, 255];
+  return [0, 0, 0, 0];
+});
+
+/** Minimal PNG encoder: 8-bit RGBA, no interlace, filter type 0 on every row. */
+function encodePng(width, height, pixel) {
+  const stride = 1 + width * 4;
+  const raw = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) raw.set(pixel(x, y), y * stride + 1 + x * 4);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // colour type: RGBA
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function pngChunk(type, data) {
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  body.copy(chunk, 4);
+  chunk.writeUInt32BE(crc32(body), 8 + data.length);
+  return chunk;
+}
+
+// CRC-32 (IEEE) over a chunk's type and data. zlib.crc32 would do, but it only
+// exists from Node 22.2 and this project supports Node 20.
+function crc32(bytes) {
+  let c = ~0;
+  for (const byte of bytes) {
+    c ^= byte;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+  }
+  return ~c >>> 0;
+}
 
 const BASIC_MODEL_ID = 1600000000001;
 const REVERSED_MODEL_ID = 1600000000002;

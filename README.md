@@ -165,8 +165,9 @@ not affected — importing only ever reads it.
 
 **Delete all locally saved decks** does the same for every deck at once, behind
 its own confirmation. It enumerates and deletes only the keys this application
-wrote (`deck:`, `media:`, `source:`, `meta-list`) rather than clearing the object
-store, so unrelated site data is never involved.
+wrote (`deck:`, `media:`, `source:`) rather than clearing the object store, so
+unrelated site data is never involved, and leaves `meta-list` as an empty
+library.
 
 The app also prunes orphaned records on load — deck data with no library entry,
 which an import interrupted at the wrong moment could leave behind, and which

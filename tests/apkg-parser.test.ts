@@ -10,6 +10,7 @@
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { inflateSync } from "node:zlib";
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import { ApkgParseError, parseApkgFile } from "@/lib/flashcards/client-import";
@@ -143,6 +144,36 @@ describe("parseApkgFile — a known-valid deck", () => {
     expect(withImage!.front).toContain('src="diagram.png"');
     expect(media.has("diagram.png")).toBe(true);
     expect((await media.get("diagram.png")!.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  });
+
+  it("bundles a diagram that is a well-formed, visible PNG", async () => {
+    // An earlier sample shipped a PNG whose IDAT would not inflate. Browsers
+    // still report its declared size, so it "loaded" — and painted nothing.
+    const { media } = await parse(await fileFromDisk(SAMPLE_PATH, "sample-deck.apkg"));
+    const png = Buffer.from(await media.get("diagram.png")!.arrayBuffer());
+
+    expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    const chunks: { type: string; data: Buffer }[] = [];
+    for (let at = 8; at < png.length; ) {
+      const length = png.readUInt32BE(at);
+      chunks.push({ type: png.toString("ascii", at + 4, at + 8), data: png.subarray(at + 8, at + 8 + length) });
+      at += 12 + length;
+    }
+    expect(chunks.map((c) => c.type)).toEqual(["IHDR", "IDAT", "IEND"]);
+
+    const ihdr = chunks[0].data;
+    const [width, height] = [ihdr.readUInt32BE(0), ihdr.readUInt32BE(4)];
+    expect([ihdr[8], ihdr[9]]).toEqual([8, 6]); // 8-bit RGBA
+    const pixels = inflateSync(chunks[1].data);
+    const stride = 1 + width * 4;
+    expect(pixels.length).toBe(height * stride);
+
+    let opaque = 0;
+    for (let y = 0; y < height; y++) {
+      expect(pixels[y * stride]).toBe(0); // filter type None, so the row is raw RGBA
+      for (let x = 0; x < width; x++) if (pixels[y * stride + 4 + x * 4] === 255) opaque++;
+    }
+    expect(opaque).toBeGreaterThan(0);
   });
 
   it("reports progress while parsing", async () => {
