@@ -1,0 +1,169 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------
+   Theme tokens
+   ------------------------------------------------------------------
+   The extracted components use semantic class names (bg-surface-elevated,
+   text-muted-foreground, border-border, text-brand-blue …). Those names are
+   kept so the viewer markup stays recognisably the same as the CCNA original,
+   but the palette here is this tool's own — no course branding.
+   ------------------------------------------------------------------ */
+
+@theme {
+  --color-background: #f6f7f9;
+  --color-foreground: #0f172a;
+  --color-surface-elevated: #ffffff;
+  --color-surface-muted: #eef1f5;
+  --color-border: #d8dee7;
+  --color-muted-foreground: #5b6675;
+  --color-brand-blue: #2563eb;
+  --color-brand-green: #16a34a;
+  --color-destructive: #dc2626;
+}
+
+:root {
+  color-scheme: light dark;
+
+  --background: #f6f7f9;
+  --foreground: #0f172a;
+  --surface-elevated: #ffffff;
+  --surface-muted: #eef1f5;
+  --border: #d8dee7;
+  --muted-foreground: #5b6675;
+  --brand-blue: #2563eb;
+  --brand-green: #16a34a;
+  --destructive: #dc2626;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b1017;
+    --foreground: #e7edf5;
+    --surface-elevated: #141b25;
+    --surface-muted: #1d2632;
+    --border: #2a3644;
+    --muted-foreground: #94a3b8;
+    --brand-blue: #60a5fa;
+    --brand-green: #4ade80;
+    --destructive: #f87171;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-muted: var(--surface-muted);
+  --color-border: var(--border);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-green: var(--brand-green);
+  --color-destructive: var(--destructive);
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ------------------------------------------------------------------
+   Flashcard viewer — normalizes raw Anki template HTML.
+   Copied from CCNA Practice Labs src/app/globals.css so uploaded decks
+   render identically.
+   ------------------------------------------------------------------ */
+
+.anki-card-content p {
+  margin: 0 0 0.75em;
+}
+
+.anki-card-content img {
+  display: block;
+  max-width: 100%;
+  max-height: 10rem;
+  width: auto;
+  height: auto;
+  margin: 0.5em auto;
+  border-radius: 0.5rem;
+  object-fit: contain;
+}
+
+.anki-card-content hr {
+  margin: 0.85em 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+.anki-card-content a {
+  color: var(--brand-blue);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--brand-blue) 40%, transparent);
+}
+
+.anki-card-content .cloze-blank {
+  font-weight: 600;
+  color: var(--brand-blue);
+}
+
+.anki-card-content .cloze-reveal {
+  font-weight: 600;
+  color: var(--brand-green);
+  background: color-mix(in srgb, var(--brand-green) 15%, transparent);
+  border-radius: 0.25rem;
+  padding: 0 0.2em;
+}
+
+.anki-card-content .source {
+  margin-top: 0.75em;
+  padding-top: 0.5em;
+  border-top: 1px dashed var(--border);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.anki-card-content .source img {
+  max-height: 3rem;
+  margin: 0 0 0.35em;
+}
+
+.anki-card-content .source-info a {
+  display: inline-block;
+}
+
+.anki-card-content audio.anki-audio {
+  width: 100%;
+  margin: 0.5em 0;
+}
+
+/* Anki decks commonly ship their own tables; keep them from breaking layout
+   on a phone. */
+.anki-card-content table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.anki-card-content td,
+.anki-card-content th {
+  border: 1px solid var(--border);
+  padding: 0.35em 0.5em;
+  text-align: left;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

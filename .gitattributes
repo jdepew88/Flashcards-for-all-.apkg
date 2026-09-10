@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.apkg binary
+*.wasm binary
+*.png binary

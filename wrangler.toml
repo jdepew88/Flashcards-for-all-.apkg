@@ -1,0 +1,22 @@
+# Cloudflare Workers static-assets configuration.
+#
+# The Flashcard Study Tool is a fully client-side single-page app: there is no
+# Worker script, no binding, no database and no secret. `assets.directory`
+# points at Vite's build output and Cloudflare serves it directly from the
+# edge, so `wrangler deploy` needs nothing beyond an authenticated account.
+#
+# Deploy with:   npm run build && npx wrangler deploy
+# Local preview: npm run build && npx wrangler dev
+
+name = "flashcard-study-tool"
+compatibility_date = "2025-09-01"
+
+[assets]
+directory = "./dist"
+
+# Client-side routing: any path that does not match a built file falls back to
+# index.html so deep links such as /#/study/<slug> resolve on a cold load.
+not_found_handling = "single-page-application"
+
+[observability]
+enabled = true

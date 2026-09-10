@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.wrangler/
+*.local
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+.vscode/*
+!.vscode/extensions.json
+.idea/
