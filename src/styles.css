@@ -289,6 +289,32 @@ html.study-mode body {
   height: 100dvh;
   padding-left: max(var(--gutter), env(safe-area-inset-left));
   padding-right: max(var(--gutter), env(safe-area-inset-right));
+  /* Cards slide in from beyond the edge: clip them rather than widen the page. */
+  overflow: hidden;
+  overflow: clip;
+}
+
+/* Phone-sized: no header, so the shell itself keeps the card clear of the
+   notch or Dynamic Island, the home indicator and — in landscape — the
+   sensor housing at the side. Nothing here is a fixed device height: the
+   card takes whatever 100dvh leaves once the insets are out. */
+.study-shell[data-layout="phone"] {
+  --gutter: 0.5rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+/* Immersive: the thinnest frame that still reads as a card on a page. */
+.study-shell[data-immersive="true"] {
+  --gutter: 0.375rem;
+  padding-top: max(0.375rem, env(safe-area-inset-top));
+  padding-bottom: max(0.375rem, env(safe-area-inset-bottom));
+}
+
+.study-shell[data-layout="wide"][data-immersive="true"] {
+  --gutter: 1rem;
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
 
 .safe-top {
@@ -324,9 +350,34 @@ html.study-mode body {
 
 /* ---------------------------------------------------------------- card -- */
 
-.flashcard-face {
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
+/* The card's shell is one layer for the card's whole life; a flip turns it
+   edge-on and swaps which face is painted (src/components/swipe-card.tsx).
+   The swap is decided here, from data-painted, so it lands in the same frame
+   as the turn reaching edge-on. Nothing relies on backface-visibility. */
+.card-shell {
+  background: var(--card);
+}
+
+.card-shell[data-painted="back"] {
+  background: var(--card-back);
+}
+
+.card-shell[data-painted="front"] > .card-back-stripe,
+.card-shell[data-painted="front"] [data-face="back"],
+.card-shell[data-painted="back"] [data-face="front"] {
+  visibility: hidden;
+}
+
+/* A long press on a card is a slow swipe, not a request for the link or
+   image callout; and a mouse drag on a link or image is a swipe, not the
+   browser's drag-and-drop. */
+.card-surface {
+  -webkit-touch-callout: none;
+}
+
+.card-surface a,
+.card-surface img {
+  -webkit-user-drag: none;
 }
 
 /* The card's own scroll container. Long cards scroll inside the card — the
@@ -494,6 +545,14 @@ details > summary::-webkit-details-marker {
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
   text-underline-offset: 0.15em;
+}
+
+/* A card link switched off (src/lib/flashcards/card-links.ts): plain text
+   that still shows the deck meant it as a link, quietly — nothing to press. */
+.anki-card-content .card-link-off {
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 0.2em;
 }
 
 .anki-card-content .cloze-blank {

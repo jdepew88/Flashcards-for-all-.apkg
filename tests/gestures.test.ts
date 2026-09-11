@@ -2,7 +2,8 @@
  * The gesture rules, exactly.
  *
  * These are the numbers that decide whether a movement on the card is a tap,
- * a swipe, a flick, a vertical flip, or nothing. The component tests drive
+ * a swipe, a flick, or nothing — and pin that vertical movement is never the
+ * card's (it scrolls). The component tests drive
  * real pointer events; this file pins the thresholds themselves, including the
  * velocity cases jsdom cannot time realistically.
  */
@@ -11,7 +12,6 @@ import { describe, expect, it } from "vitest";
 import {
   AXIS_LOCK_DISTANCE,
   FLICK_MIN_DISTANCE,
-  VERTICAL_FLIP_DISTANCE,
   VelocityTracker,
   classifyRelease,
   lockAxis,
@@ -26,13 +26,10 @@ function release(overrides: Partial<ReleaseInput>) {
   return classifyRelease({
     axis: "x",
     dx: 0,
-    dy: 0,
     vx: 0,
-    vy: 0,
     cardWidth: PHONE_CARD,
     canGoPrevious: true,
     canGoNext: true,
-    verticalFlip: true,
     ...overrides,
   });
 }
@@ -89,29 +86,18 @@ describe("horizontal swipes", () => {
   });
 });
 
-describe("vertical swipes", () => {
-  it("flip the card when they travel far enough, in either direction", () => {
-    expect(release({ axis: "y", dy: -VERTICAL_FLIP_DISTANCE })).toBe("flip");
-    expect(release({ axis: "y", dy: VERTICAL_FLIP_DISTANCE + 10 })).toBe("flip");
-  });
-
-  it("flip on a short, quick flick", () => {
-    expect(release({ axis: "y", dy: -36, vy: -0.7 })).toBe("flip");
-  });
-
-  it("do nothing when short and slow", () => {
-    expect(release({ axis: "y", dy: -30, vy: -0.1 })).toBe("cancel");
-  });
-
-  it("belong to the scroll when the card's content scrolls", () => {
-    expect(release({ axis: "y", dy: -120, vy: -1, verticalFlip: false })).toBe("cancel");
+describe("vertical movement", () => {
+  it("never flips or navigates: it belongs to scrolling", () => {
+    // Vertical swipe-to-flip was removed; tap is the flip gesture.
+    expect(release({ axis: "y", dx: -4, vx: -0.1 })).toBe("cancel");
+    expect(release({ axis: "y", dx: -200, vx: -2 })).toBe("cancel");
   });
 });
 
 describe("everything else", () => {
   it("does nothing for an undecided or ambiguous gesture", () => {
     expect(release({ axis: null, dx: -200 })).toBe("cancel");
-    expect(release({ axis: "none", dx: -200, dy: -190 })).toBe("cancel");
+    expect(release({ axis: "none", dx: -200 })).toBe("cancel");
   });
 
   it("resists drags toward a card that is not there, more the further they go", () => {

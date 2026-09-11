@@ -78,10 +78,16 @@ interface FlashcardDeck {
 ## The study experience
 
 The flashcard is the whole point of the study screen, so everything else gets
-out of its way: a compact header (back, deck name, theme, options), a slim
-progress line, the card, and the controls. Chapter filter, shuffle, hide-known,
-restart, reading options and the phone control mode all live in one **Study
-options** sheet — a bottom sheet on phones, a side panel on larger screens.
+out of its way. On a phone there is no header at all: the card fills the
+screen, its position — `13 ─── 884`, the current card on the left and the run's
+length on the right, read as "Card 13 of 884" by screen readers — sits inside
+the card, and two small controls float over its top-right corner: **Full
+screen** and **Study options**. Tablets and desktops keep a compact header
+(back, deck name, full screen, theme, options) and Previous · Flip · Next
+buttons. Chapter filter, shuffle, hide-known, restart, reading options, card
+links, the phone control mode, the theme and the way back to your decks all
+live in one **Study options** sheet — a bottom sheet on phones, a side panel on
+larger screens.
 
 ### Controls by screen size
 
@@ -91,7 +97,7 @@ coarse pointer on a screen shorter than 500px (a phone held sideways).
 
 | Layout | Default controls | Also works |
 | --- | --- | --- |
-| Phone-sized | **Gestures** — no button bar, the card gets the space | Buttons mode (Study options → Touch controls), remembered in this browser |
+| Phone-sized | **Gestures** — no header and no button bar; the card gets the screen | Buttons mode (Study options → Touch controls): a bottom strip in portrait, rails either side of the card in landscape. Remembered in this browser |
 | Tablet / larger | Previous · Flip · Next buttons | Gestures on the card |
 | Desktop / laptop | Previous · Flip · Next buttons | Keyboard shortcuts (hinted for mouse users), mouse drag |
 
@@ -102,10 +108,10 @@ keyboard and screen-reader users; they appear as soon as one has focus.
 
 | Gesture | Action |
 | --- | --- |
-| Swipe left | Next card — the card follows the finger, flies out left, the next enters from the right |
+| Swipe left | Next card — the card follows the finger with the next card riding alongside; on release the pair slides left together |
 | Swipe right | Previous card — the mirror image |
 | Tap | Flip (immediately; no double-tap wait) |
-| Swipe up or down | Flip — only while the visible face fits; a long card scrolls instead |
+| Swipe up or down | Nothing on the card: it scrolls a long face. Tap is the flip |
 
 The rules live in `src/lib/gestures.ts`. A swipe commits past about a fifth of
 the card's width (64–110px) or on a flick (≥32px at ≥0.45px/ms); anything
@@ -115,6 +121,12 @@ still roughly diagonal after 24px is ignored rather than guessed at, and letting
 go while pulling back toward the start cancels. Swiping past either end of the
 deck rubber-bands and says so, with a Restart action at the end.
 
+Vertical swipe-to-flip was removed. It only worked while the visible face fit
+without scrolling, so the same movement meant "flip" on one card and "scroll"
+on the next — and a face that fits in portrait may scroll in landscape. Tap is
+the flip; vertical movement always scrolls. A swipe that starts on a link
+inside the card is still a swipe (see *Links inside cards*).
+
 The first time someone studies in gesture mode, a small hint ("Swipe to move ·
 Tap to flip") sits on the card until their first gesture, and then never
 returns.
@@ -122,9 +134,69 @@ returns.
 ### Keyboard
 
 `←` / `→` move, `Space` (or `Enter`, `↑`, `↓`) flips, `K` marks the card known,
-`Esc` closes a sheet or dialog. Keys are left alone while a form control, media
+`Esc` closes a sheet or dialog, or leaves full screen. Keys are left alone while a form control, media
 player or dialog has focus, Space and Enter are left to a focused button, and
 anything with a modifier held is ignored — `Alt+←` still means Back.
+
+### Full screen (immersive mode)
+
+**Full screen** — the ⤢ control on the card on a phone, in the header on larger
+screens, and in Study options — hides everything that is not the card: header,
+deck title, back button, hints. What remains is the card with its position, the
+controls you chose (Buttons mode keeps its buttons), and one floating **Study
+options** control, which holds the way out (*Exit full screen*) and the way back
+to your decks (*Exit study session*). `Esc` leaves too. Entering or leaving
+never touches the card, its side or its scroll position.
+
+Where the browser genuinely offers the Fullscreen API — desktop browsers,
+Android, iPad — Full screen also asks it to hide the browser's own chrome, from
+the same click. The API is feature-detected (`src/lib/display-mode.ts`), never
+inferred from the browser's name, and when the browser leaves full screen by
+its own means (Escape, a system back gesture) immersive mode follows it out.
+
+### iPhone and the Home Screen
+
+An ordinary iPhone browser tab — Safari, Chrome or any other — cannot hide the
+browser's address bar and toolbar: iPhone browsers give pages no Fullscreen
+API. There, Full screen hides the app's own chrome at once, with no error, and
+the first time only shows a short tip: *For the most screen space on iPhone,
+add Flashcards for All to your Home Screen.* It links to a help sheet (also in
+Study options → Add to Home Screen) that explains the Share-menu route, which
+works from Safari and from other iOS browsers alike.
+
+Opened from the Home Screen, the site runs as a standalone web app
+(`public/manifest.webmanifest`, `display: standalone` — which iOS honours,
+unlike manifest `fullscreen` — plus `apple-mobile-web-app-*` tags for older
+iOS). **That copy keeps its own storage**, separate from the browser's, so decks
+imported in Safari or Chrome do not appear there by themselves: import the
+`.apkg` again inside it. The help sheet says so, Study options says so when the
+app detects it is running installed, and so does the landing page. Nothing is
+synced or uploaded to smooth this over — decks stay on the device.
+
+There is deliberately no service worker: no offline cache, and so nothing that
+could serve a stale build. The manifest and icons are static files; `npm run
+icons` regenerates the icons from the app mark.
+
+On a real iPhone, the checks the automated runs cannot make: tap and swipe in
+portrait; rotate; tap and swipe in landscape; a linked card with Card links off,
+then on; Full screen; then Add to Home Screen, open it, and import a deck there.
+
+### Links inside cards
+
+Imported decks often link to textbooks, bookshops or reference pages. **Study
+options → Card links** decides what those do:
+
+| Card links | Behaviour |
+| --- | --- |
+| **Disabled** (default) | Links show as plain text with a quiet dotted underline. They cannot navigate, are not tab stops and are not announced as links; a tap on one flips the card and a swipe on one moves between cards |
+| Enabled | A deliberate tap follows the link in a new tab (`target="_blank" rel="noopener noreferrer"`), so the study session stays put and the opened page gets no `window.opener`. A swipe that starts on a link is still a swipe, and the click after it is cancelled. App controls never activate a card link |
+
+A link that could only point back into this page (`#…`) is always plain text —
+the app routes on the hash, so following one would drop you out of the deck.
+The policy is applied at render time to already-sanitized HTML
+(`src/lib/flashcards/card-links.ts`): it only removes or tightens, never
+re-admits a scheme the sanitizer blocks, and never changes the stored deck or
+the original `.apkg`. The choice is remembered in this browser.
 
 ### Light and Dark
 
@@ -140,10 +212,30 @@ themes and that every text/background pair meets WCAG AA contrast.
 
 ### Motion
 
-The flip is a restrained 3D turn with both faces backface-hidden; navigation
-moves in the direction the card was thrown. With `prefers-reduced-motion:
-reduce`, the flip becomes a short cross-fade, cards fade rather than fly, and
-nothing tilts — every action works the same.
+The flip is a quick turn of the whole card — edge-on, the face swaps at the
+instant it is invisible, and back, in about a third of a second. The card's
+shell (background, border, shadow and position footer) is one element that
+stays mounted, and both faces stay in the DOM, so a flip never remounts
+anything, never changes size, and never shows mirrored text, both faces, or
+neither.
+
+It replaced a two-face 3D flip that relied on `backface-visibility: hidden`
+inside a `preserve-3d` context, and that was the flicker on iPhone. Under
+Playwright's WebKit (the engine of every iPhone browser, Chrome included) the
+back face painted mirrored over the front even at rest; and because
+framer-motion writes `transform: none` for an untransformed element, every flip
+also created a new 3D compositing layer on its first frame. Now nothing relies
+on backface-visibility, and the shell's transform is always a 3D transform, so
+its layer exists before a flip starts.
+
+Moving between cards is a carousel: while you drag, the neighbouring card rides
+alongside; on release the two slide with the same timing, so the incoming card
+is complete and on screen before the outgoing one leaves, and no frame shows an
+empty stage. Neighbouring cards are rendered ahead of time — sanitized, link
+policy applied, images decoded — so a move never parses HTML mid-animation.
+
+With `prefers-reduced-motion: reduce`, the face swaps in place and cards
+cross-fade instead of sliding — every action works the same.
 
 ---
 
@@ -364,15 +456,18 @@ npm install
 npm test
 ```
 
-240 tests across twelve files:
+294 tests across fifteen files:
 
 | File | Covers |
 | --- | --- |
 | `tests/apkg-parser.test.ts` | The real `.apkg` parses; output matches the CCNA deck schema exactly; chapters, tags, cloze, reversed notes and media; every rejection path (wrong extension, empty file, non-zip, no collection, `anki21b`, empty `col`, no cards, oversized) and the skip-don't-fail behavior for damaged cards |
 | `tests/anki-template.test.ts` | The template renderer, pinned to CCNA Practice Labs' behavior: field substitution, conditionals, cloze blanking and reveal, `{{FrontSide}}`, HTML sanitization, link externalization, media collection and rewriting |
 | `tests/flashcard-viewer.test.tsx` | Rendering, flipping (button, keyboard), previous/next (buttons, arrow keys, bounds), shuffle, restart, chapter filtering and the active-filter summary, known-marking, hide-known, reset progress, the Study options sheet and its focus handling, and exiting |
-| `tests/study-interactions.test.tsx` | Real pointer sequences on the card: tap flips; swipe left/right navigates; vertical swipes flip; small, tentative and diagonal movements do nothing; a swipe never also flips; flipping survives repeated swipes; edges rubber-band and say so; long cards keep vertical movement for scrolling; wide tables keep horizontal drags but still flip on tap; the card's touch-action reaches its own scroll area. Phone gesture mode vs Buttons mode, the one-time hint, persistence of the choice; tablet/desktop controls; keyboard shortcuts and what they leave alone; reduced motion; live announcements and hidden-face semantics |
-| `tests/gestures.test.ts` | The gesture thresholds exactly: axis locking, distance scaling, flicks vs twitches, reversal, edges, vertical flips, rubber-banding, release velocity |
+| `tests/study-interactions.test.tsx` | Real pointer sequences on the card: tap flips; swipe left/right navigates; vertical swipes never flip; small, tentative and diagonal movements do nothing; a swipe never also flips; flipping survives repeated swipes; edges rubber-band and say so; long cards keep vertical movement for scrolling; wide tables keep horizontal drags but still flip on tap; the card's `pan-y` touch-action reaches its own scroll area. Phone gesture mode vs Buttons mode, the one-time hint, persistence of the choice; tablet/desktop controls; keyboard shortcuts and what they leave alone; reduced motion; live announcements, hidden-face semantics and "Card X of Y" |
+| `tests/gestures.test.ts` | The gesture thresholds exactly: axis locking, distance scaling, flicks vs twitches, reversal, edges, vertical movement never the card's, rubber-banding, release velocity |
+| `tests/card-links.test.tsx` | The card-link policy (disabled → plain text keeping only its look; enabled → new tab with `noopener noreferrer`; `#` links never kept; nothing the sanitizer blocks re-admitted; the stored card never changed) and the DEXA regression: a card that is mostly one wrapping link flips on a tap and navigates on a swipe that starts on the link, in both modes; app controls never activate it; the preference persists and defaults to disabled for existing users |
+| `tests/immersive-study.test.tsx` | The position inside the card (current left, total right, "Card X of Y", counts the active filter); the phone screen's missing header, title and back button, with the library still reachable from Study options; immersive mode entering and leaving (Study options, Escape, the browser leaving full screen), focus hand-off by input type, the Fullscreen API called only where it exists; the one-time iPhone Home Screen tip and help; installed-mode messaging; rotation keeping the card, its side and the card element; Buttons mode moving to rails in landscape; reduced motion |
+| `tests/pwa.test.ts` | The manifest (valid, standalone, icons that exist at their stated sizes, a maskable icon, same-origin only), its link and the iOS metadata in `index.html`, no service worker, and installed-mode / Home Screen detection |
 | `tests/theme.test.tsx` | The pre-paint bootstrap (key contract, stored choice, junk, blocked storage, blocking `<head>` script with no inline code), the toggle and its persistence, the cross-fade, reduced motion, token parity between the two dark declarations, and WCAG AA contrast for every text/background pair in both themes |
 | `tests/end-to-end.test.tsx` | The full chain — real file → parser → viewer — plus loading one deck, leaving it, and loading another |
 | `tests/upload-screen.test.tsx` | Landing copy and privacy statements, the empty library, import via picker and via drag-and-drop, persistence to real IndexedDB, the deck library for a returning visitor, the ⋯ menu (keyboard included), "download original" built from local bytes, confirmed deletion (Cancel focused) and delete-all, and every error path a visitor can hit |
@@ -385,19 +480,32 @@ The Cloudflare configuration is additionally validated for real with
 `npx wrangler deploy --dry-run`.
 
 **Beyond jsdom.** jsdom performs no layout and has no touch pipeline, so the
-production build has also been driven in real Chromium browsers (Edge and
-Chrome, headless) through `wrangler dev`, with the production headers applied
-and touch input injected through the DevTools protocol so the browser runs its
-own touch-action and tap handling. That run covers phone (390×844 and 320×640),
-tablet (768×1024) and desktop (1440×900), light and dark, reduced motion, long
-cards, wide tables and cloze. It is how the one bug jsdom could not see was
-found: the card's scroll area ended the touch-action chain, so the browser
-cancelled every swipe.
+production build is also driven in real browsers through `wrangler dev`, with
+the production headers applied: Playwright's **WebKit** (the engine behind
+every iPhone browser) and **Chromium**, headless. Chromium gets real touch input
+through the DevTools protocol, so it runs its own touch-action and tap
+handling; WebKit gets real touch taps and real mouse drags. Animations are
+sampled every frame (which face is painted, the turn angle, whether a card
+covers the stage) and, with time slowed twelvefold, photographed frame by
+frame. The runs cover 320×640, 375×667, 390×844, 393×852 and 430×932 portrait,
+844×390 and 932×430 landscape, 768×1024 and 1440×900; flips and swipes both
+ways; rotation with a flipped, scrolled long card in Gestures, Buttons and
+immersive modes; the card-link regression with real taps and swipes (and the
+opened page's `window.opener`); reduced motion; light and dark; and an
+iPhone-capability emulation (no Fullscreen API, `navigator.standalone`
+present). That is how the WebKit flip fault above was found — and, earlier,
+the card's scroll area ending the touch-action chain, which cancelled every
+real swipe while every unit test passed.
 
-**Still not covered:** a physical phone or tablet, and Safari and Firefox.
-Injected touch is the browser's real pipeline, but not a finger on glass — iOS
-Safari in particular has its own edge-swipe and scrolling behaviour. Worth ten
-minutes on an iPhone and an Android phone before you send the link to anyone.
+For local WebKit runs use `npx wrangler dev --local-protocol https`: the CSP's
+`upgrade-insecure-requests` makes WebKit fetch `http://127.0.0.1` subresources
+over HTTPS (Chromium exempts loopback).
+
+**Still not covered:** a physical iPhone or Android phone, and Firefox.
+Playwright's WebKit is not iOS WebKit — it is a desktop port with its own
+compositor — and injected touch is the browser's real pipeline, but not a
+finger on glass. iOS also has its own edge-swipe, toolbar-resize and Home
+Screen behaviour. See the real-iPhone checks under *iPhone and the Home Screen*.
 
 ---
 
@@ -481,10 +589,13 @@ flashcard-deployment/
 │   ├── robots.txt                 Real robots file (else the SPA fallback would serve index.html)
 │   ├── sql-wasm.wasm              SQLite WebAssembly, copied in on install
 │   ├── sample-deck.apkg           Generated sample deck, also the test fixture
+│   ├── manifest.webmanifest       Home Screen / installed app (display: standalone)
+│   ├── icons/                     Install icons, generated by scripts/make-icons.mjs
 │   └── favicon.svg
 ├── scripts/
 │   ├── copy-sql-wasm.mjs          postinstall / prebuild copy step
-│   └── make-sample-apkg.mjs       Builds the sample .apkg (npm run fixtures)
+│   ├── make-sample-apkg.mjs       Builds the sample .apkg (npm run fixtures)
+│   └── make-icons.mjs             Builds the install icons from the app mark (npm run icons)
 ├── src/
 │   ├── main.tsx                   React entry
 │   ├── App.tsx                    Two screens, one hash route
@@ -495,6 +606,7 @@ flashcard-deployment/
 │   │   ├── flashcard-viewer.tsx   The study screen: layout, controls, keyboard  [extracted]
 │   │   ├── swipe-card.tsx         One card: gestures, the flip, both faces
 │   │   ├── flashcard-options-sheet.tsx  Study options sheet / panel  [extracted]
+│   │   ├── home-screen-help.tsx   "Add to Home Screen" help sheet (iPhone)
 │   │   ├── theme-toggle.tsx       Light ↔ Dark control
 │   │   └── ui/
 │   │       ├── primitives.tsx     Button
@@ -504,6 +616,8 @@ flashcard-deployment/
 │   │       └── confirm-dialog.tsx Confirmation for destructive actions
 │   └── lib/
 │       ├── gestures.ts                Swipe / tap / flick rules, as pure functions
+│       ├── display-mode.ts            Fullscreen API + installed-app detection (feature tests only)
+│       ├── input-modality.ts          Keyboard vs pointer, for focus hand-off
 │       ├── theme.ts                   Theme storage, bootstrap contract, toggle hook
 │       ├── use-media-query.ts         Layout and pointer queries, reduced motion
 │       ├── focus.ts                   Focus trap for sheets and dialogs
@@ -512,6 +626,7 @@ flashcard-deployment/
 │       │   ├── anki-template.ts       Anki template renderer  [verbatim]
 │       │   ├── client-import.ts       .apkg parser  [extracted]
 │       │   ├── sanitize.ts            Allowlist HTML sanitizer
+│       │   ├── card-links.ts          Render-time card-link policy + render cache
 │       │   ├── resolve-deck-media.ts  Media → blob: URLs  [extracted]
 │       │   └── uploaded-decks.ts      IndexedDB deck storage  [extracted]
 │       ├── storage/persistence.ts     navigator.storage.persist() + quota
@@ -561,12 +676,18 @@ that sheet.
 
 ## Limitations
 
-- **Pinch-zoom does not start on the card while the card fits.** The card sets
-  `touch-action: none` so swipes and vertical flips reach the app rather than
-  the browser; use the text-size option in Study options instead. Long cards
-  switch to `pan-y` and scroll natively, and the rest of the page zooms as
-  normal. Wide tables inside a card scroll sideways under a finger — swipe on
-  the rest of the card to move on.
+- **Pinch-zoom does not start on the card.** The card sets `touch-action:
+  pan-y`: vertical panning scrolls a long card natively, horizontal movement is
+  the app's (swipes), and pinch-zoom is not part of it — use the text-size
+  option in Study options instead. Wide tables inside a card scroll sideways
+  under a finger — swipe on the rest of the card to move on.
+- **An iPhone browser tab cannot hide the browser's own bars.** iPhone browsers
+  give pages no Fullscreen API, so Full screen there hides the app's own chrome
+  only. Opening the site from the Home Screen removes the browser bars — and
+  that copy keeps its own storage (see *iPhone and the Home Screen*).
+- **The back-swipe from the very edge of the screen is the browser's.** The card
+  sits a few pixels in from the edge; a swipe that starts on the edge itself
+  may be taken by the browser as Back, which returns to your decks.
 - **Per-device, per-browser.** Decks live in that browser's IndexedDB. Nothing
   syncs. Clearing site data removes them, and without granted persistent storage
   the browser may evict them under storage pressure.

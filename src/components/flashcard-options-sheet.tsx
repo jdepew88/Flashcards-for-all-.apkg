@@ -2,9 +2,11 @@
 //
 // Started as CCNA Practice Labs' flashcard-options-sheet.tsx (font, text size,
 // exit). It now also holds what used to be a toolbar above the card — chapter
-// filter, shuffle, hide-known, restart — plus how phone-sized screens are
-// operated and the keyboard shortcuts. Moving them here is what lets the study
-// screen give the card nearly all of its space.
+// filter, shuffle, hide-known, restart — plus the screen (full screen, theme,
+// Add to Home Screen), how phone-sized screens are operated, what links inside
+// cards do, and the keyboard shortcuts. Moving them here is what lets the
+// study screen give the card nearly all of its space: on a phone, and in
+// immersive mode, this sheet is the one secondary control there is.
 //
 // A bottom sheet on phone-sized screens (drag the handle down to dismiss), a
 // side panel on larger ones. Modal either way: focus moves in, Tab stays in,
@@ -14,26 +16,41 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 import { AnimatePresence, motion, useDragControls, type PanInfo } from "framer-motion";
 import {
   ChevronDown,
+  ChevronRight,
   EyeOff,
   Hand,
+  Link2,
+  Link2Off,
   LogOut,
+  Maximize2,
+  Minimize2,
   Minus,
+  Moon,
   MousePointerClick,
   Plus,
   RotateCcw,
   Shuffle,
+  SquarePlus,
+  Sun,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 import { trapFocus } from "@/lib/focus";
+import { useTheme } from "@/lib/theme";
 import { FLASHCARD_FONTS, type FlashcardFontId } from "@/lib/fonts";
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, type ControlMode } from "@/lib/stores/prefs-store";
+import type { CardLinkMode } from "@/lib/flashcards/card-links";
 import type { FlashcardDeck } from "@/lib/flashcards/types";
 
 const CONTROL_MODES: { value: ControlMode; label: string; Icon: typeof Hand }[] = [
   { value: "gestures", label: "Gestures", Icon: Hand },
   { value: "buttons", label: "Buttons", Icon: MousePointerClick },
+];
+
+const LINK_MODES: { value: CardLinkMode; label: string; Icon: typeof Hand }[] = [
+  { value: "disabled", label: "Disabled", Icon: Link2Off },
+  { value: "enabled", label: "Enabled", Icon: Link2 },
 ];
 
 export interface FlashcardOptionsSheetProps {
@@ -51,9 +68,18 @@ export interface FlashcardOptionsSheetProps {
   onHideKnownChange: (hide: boolean) => void;
   knownCount: number;
   onRestart: () => void;
+  immersive: boolean;
+  onToggleImmersive: () => void;
+  /** An iPhone tab: the Home Screen is the only way to lose the browser chrome. */
+  offerHomeScreen: boolean;
+  /** Running from the Home Screen / as an installed app. Messaging only. */
+  installed: boolean;
+  onHomeScreenHelp: () => void;
   showControlMode: boolean;
   controlMode: ControlMode;
   onControlModeChange: (mode: ControlMode) => void;
+  cardLinks: CardLinkMode;
+  onCardLinksChange: (mode: CardLinkMode) => void;
   showShortcuts: boolean;
   font: FlashcardFontId;
   onFontChange: (font: FlashcardFontId) => void;
@@ -121,6 +147,14 @@ export function FlashcardOptionsSheet(props: FlashcardOptionsSheetProps) {
                 ? "inset-x-0 bottom-0 max-h-[88dvh] rounded-t-[1.75rem] border-t"
                 : "bottom-4 right-4 top-4 w-[min(24rem,calc(100vw-2rem))] rounded-3xl border"
             )}
+            style={
+              compact
+                ? {
+                    paddingLeft: "env(safe-area-inset-left)",
+                    paddingRight: "env(safe-area-inset-right)",
+                  }
+                : undefined
+            }
             initial={compact ? { y: "100%" } : { x: 32, opacity: 0 }}
             animate={compact ? { y: 0 } : { x: 0, opacity: 1 }}
             exit={compact ? { y: "100%" } : { x: 32, opacity: 0 }}
@@ -151,7 +185,7 @@ export function FlashcardOptionsSheet(props: FlashcardOptionsSheetProps) {
                 type="button"
                 onClick={onClose}
                 aria-label="Close options"
-                className="-mr-2 flex h-10 w-10 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-muted hover:text-foreground"
+                className="-mr-2 flex h-11 w-11 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-muted hover:text-foreground"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -197,17 +231,61 @@ function OptionsBody({
   onHideKnownChange,
   knownCount,
   onRestart,
+  immersive,
+  onToggleImmersive,
+  offerHomeScreen,
+  installed,
+  onHomeScreenHelp,
   showControlMode,
   controlMode,
   onControlModeChange,
+  cardLinks,
+  onCardLinksChange,
   showShortcuts,
   font,
   onFontChange,
   fontSize,
   onFontSizeChange,
 }: FlashcardOptionsSheetProps) {
+  const [theme, toggleTheme] = useTheme();
+
   return (
     <>
+      <Section title="Screen">
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant={immersive ? "primary" : "secondary"} className="px-3" onClick={onToggleImmersive}>
+            {immersive ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {immersive ? "Exit full screen" : "Full screen"}
+          </Button>
+          <Button variant="secondary" className="px-3" onClick={toggleTheme}>
+            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            {theme === "dark" ? "Light theme" : "Dark theme"}
+          </Button>
+        </div>
+        {offerHomeScreen && (
+          <button
+            type="button"
+            onClick={onHomeScreenHelp}
+            className="mt-2 flex w-full items-center gap-3 rounded-2xl border border-border px-3.5 py-3 text-left transition-colors hover:bg-surface"
+          >
+            <SquarePlus className="h-[18px] w-[18px] shrink-0 text-accent" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[15px] font-medium">Add to Home Screen</span>
+              <span className="block text-[13px] text-muted">
+                The most screen space on iPhone, without the browser bars.
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted" />
+          </button>
+        )}
+        {installed && (
+          <p className="mt-2 px-1 text-[13px] leading-relaxed text-muted">
+            Opened from your Home Screen. Decks here may be stored separately from your
+            browser&apos;s, so a deck imported in the browser may need importing again here.
+          </p>
+        )}
+      </Section>
+
       <Section title="Cards">
         <div className="relative">
           <select
@@ -254,39 +332,28 @@ function OptionsBody({
 
       {showControlMode && (
         <Section title="Touch controls">
-          <div
-            role="group"
-            aria-label="Touch controls"
-            className="grid grid-cols-2 gap-1 rounded-2xl bg-surface-muted p-1"
-          >
-            {CONTROL_MODES.map(({ value, label, Icon }) => {
-              const pressed = controlMode === value;
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={pressed}
-                  onClick={() => onControlModeChange(value)}
-                  className={cn(
-                    "flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-[background-color,color,box-shadow] duration-150",
-                    pressed
-                      ? "bg-surface-elevated text-foreground shadow-soft"
-                      : "text-muted hover:text-foreground"
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+          <Segmented
+            label="Touch controls"
+            options={CONTROL_MODES}
+            value={controlMode}
+            onChange={onControlModeChange}
+          />
           <p className="mt-2 px-1 text-[13px] leading-relaxed text-muted">
             {controlMode === "gestures"
               ? "Swipe the card left or right to move, and tap it to flip."
-              : "Previous, Flip and Next buttons along the bottom. Gestures still work too."}
+              : "Previous, Flip and Next buttons beside the card. Gestures still work too."}
           </p>
         </Section>
       )}
+
+      <Section title="Card links">
+        <Segmented label="Card links" options={LINK_MODES} value={cardLinks} onChange={onCardLinksChange} />
+        <p className="mt-2 px-1 text-[13px] leading-relaxed text-muted">
+          {cardLinks === "disabled"
+            ? "Links inside cards show as plain text, so a tap flips the card instead of leaving it."
+            : "Tapping a link inside a card opens it in a new tab. Swipes that start on a link still move between cards."}
+        </p>
+      </Section>
 
       <Section title="Reading">
         <div role="group" aria-label="Font" className="grid grid-cols-3 gap-1.5">
@@ -356,7 +423,7 @@ function OptionsBody({
             <dt>
               <kbd className="kbd">Esc</kbd>
             </dt>
-            <dd className="text-muted">Close this panel</dd>
+            <dd className="text-muted">Close this panel, or leave full screen</dd>
           </dl>
         </Section>
       )}
@@ -372,6 +439,43 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       </h3>
       {children}
     </section>
+  );
+}
+
+function Segmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string; Icon: typeof Hand }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div role="group" aria-label={label} className="grid grid-cols-2 gap-1 rounded-2xl bg-surface-muted p-1">
+      {options.map(({ value: option, label: optionLabel, Icon }) => {
+        const pressed = value === option;
+        return (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={pressed}
+            onClick={() => onChange(option)}
+            className={cn(
+              "flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-[background-color,color,box-shadow] duration-150",
+              pressed
+                ? "bg-surface-elevated text-foreground shadow-soft"
+                : "text-muted hover:text-foreground"
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {optionLabel}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

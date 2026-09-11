@@ -54,8 +54,14 @@ function setMedia({ compact = false, reduced = false, fine = false } = {}) {
   })) as typeof window.matchMedia;
 }
 
-const counter = () =>
-  screen.getByTestId("card-counter").textContent?.replace(/\s+/g, " ").trim();
+/** "2 / 4" — the in-card position ("2 ─── 4"), or "0 / 0" when no card shows. */
+function counter() {
+  const position = screen.queryByTestId("card-position");
+  if (!position) return "0 / 0";
+  const current = within(position).getByTestId("card-position-current").textContent;
+  const total = within(position).getByTestId("card-position-total").textContent;
+  return `${current} / ${total}`;
+}
 
 function isFlipped() {
   const flippers = screen.getAllByTestId("card-flipper");
@@ -87,7 +93,8 @@ function drag(target: Element, { dx = 0, dy = 0, steps = 5 } = {}) {
     });
   }
   fireEvent.pointerUp(target, { ...pointer, clientX: x0 + dx, clientY: y0 + dy });
-  fireEvent.click(target, { clientX: x0 + dx, clientY: y0 + dy });
+  // detail: 1, as for any click a pointer produces (keyboard clicks carry 0).
+  fireEvent.click(target, { clientX: x0 + dx, clientY: y0 + dy, detail: 1 });
 }
 
 async function openOptions(user: ReturnType<typeof userEvent.setup>) {
@@ -152,11 +159,13 @@ describe("touch gestures on the card", () => {
     expect(screen.getByText("Front 1")).toBeInTheDocument();
   });
 
-  it("swipe up or down flips the card", () => {
+  it("leaves vertical movement to scrolling: a vertical swipe neither flips nor moves", () => {
+    // Tap is the flip gesture. Vertical swipe-to-flip was removed so vertical
+    // movement always means scroll, whether or not the face happens to scroll.
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
     drag(card(), { dy: -90 });
-    expect(isFlipped()).toBe(true);
+    expect(isFlipped()).toBe(false);
 
     drag(card(), { dy: 90 });
     expect(isFlipped()).toBe(false);
@@ -300,7 +309,9 @@ describe("touch gestures on the card", () => {
     // before this was set. (jsdom has no touch pipeline to show the failure.)
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
-    expect(card().style.touchAction).toBe("none");
+    // pan-y: vertical panning (scrolling) is the browser's, horizontal
+    // movement is the card's — the same on the card and inside it.
+    expect(card().style.touchAction).toBe("pan-y");
     for (const area of card().querySelectorAll<HTMLElement>(".card-scroll")) {
       expect(area.style.touchAction).toBe(card().style.touchAction);
     }
@@ -587,13 +598,11 @@ describe("assistive technology", () => {
     );
   });
 
-  it("reports progress as a labelled progress bar", () => {
+  it("reads the card's position as 'Card X of Y', from inside the card", () => {
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
-    const progress = screen.getByRole("progressbar", { name: "Position in deck" });
 
-    expect(progress).toHaveAttribute("aria-valuenow", "1");
-    expect(progress).toHaveAttribute("aria-valuemax", "4");
+    expect(screen.getByTestId("card-position")).toHaveTextContent("Card 1 of 4");
     fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(progress).toHaveAttribute("aria-valuetext", "Card 2 of 4");
+    expect(screen.getByTestId("card-position")).toHaveTextContent("Card 2 of 4");
   });
 });

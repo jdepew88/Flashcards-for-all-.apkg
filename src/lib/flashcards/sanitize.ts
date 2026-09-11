@@ -174,7 +174,7 @@ export interface SanitizeOptions {
  * leading whitespace, embedded control characters (including the NUL, tab and
  * newline that browsers ignore inside URLs) — then lowercases.
  */
-function normalizeUrl(value: string): string {
+export function normalizeUrl(value: string): string {
   // eslint-disable-next-line no-control-regex
   return value.replace(/[\u0000-\u0020\u007f-\u00a0]/g, "").toLowerCase();
 }

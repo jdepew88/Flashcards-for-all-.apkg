@@ -11,7 +11,7 @@
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { FlashcardViewer } from "@/components/flashcard-viewer";
@@ -42,6 +42,15 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+/** "2 / 4" — the in-card position ("2 ─── 4"), or "0 / 0" when no card shows. */
+function counter() {
+  const position = screen.queryByTestId("card-position");
+  if (!position) return "0 / 0";
+  const current = within(position).getByTestId("card-position-current").textContent;
+  const total = within(position).getByTestId("card-position-total").textContent;
+  return `${current} / ${total}`;
+}
+
 async function chooseChapter(user: ReturnType<typeof userEvent.setup>, chapter: string) {
   await user.click(screen.getByRole("button", { name: "Study options" }));
   await user.selectOptions(await screen.findByLabelText("Filter by chapter"), chapter);
@@ -52,12 +61,12 @@ describe("a parsed .apkg drives the study interface", () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={parsedDeck} onExit={vi.fn()} />);
 
-    expect(screen.getByTestId("card-counter")).toHaveTextContent("1 / 6");
+    expect(counter()).toBe("1 / 6");
 
     for (let i = 2; i <= 6; i++) {
       await user.click(screen.getByRole("button", { name: /next/i }));
       await waitFor(() => expect(screen.getAllByTestId("card-flipper")).toHaveLength(1));
-      expect(screen.getByTestId("card-counter")).toHaveTextContent(`${i} / 6`);
+      expect(counter()).toBe(`${i} / 6`);
     }
 
     expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
@@ -69,7 +78,7 @@ describe("a parsed .apkg drives the study interface", () => {
 
     await chooseChapter(user, "Chapter 2 - Cloze Practice");
 
-    expect(screen.getByTestId("card-counter")).toHaveTextContent("1 / 1");
+    expect(counter()).toBe("1 / 1");
     expect(document.body.innerHTML).toContain("cloze-blank");
   });
 
@@ -126,7 +135,7 @@ describe("loading a deck, then another one", () => {
     const view = render(<Screen slug="upload-a" onExit={onExit} />);
 
     expect(await screen.findByTitle("Deck A")).toBeInTheDocument();
-    expect(screen.getByTestId("card-counter")).toHaveTextContent("1 / 6");
+    expect(counter()).toBe("1 / 6");
 
     await user.click(screen.getByRole("button", { name: "Back to your decks" }));
     expect(onExit).toHaveBeenCalledTimes(1);
@@ -134,7 +143,7 @@ describe("loading a deck, then another one", () => {
     view.rerender(<Screen slug="upload-b" onExit={onExit} />);
 
     expect(await screen.findByTitle("Deck B")).toBeInTheDocument();
-    expect(screen.getByTestId("card-counter")).toHaveTextContent("1 / 1");
+    expect(counter()).toBe("1 / 1");
     expect(screen.getByText("B front")).toBeInTheDocument();
 
     vi.doUnmock("@/lib/flashcards/uploaded-decks");

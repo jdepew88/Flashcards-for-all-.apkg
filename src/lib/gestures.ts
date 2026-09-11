@@ -5,7 +5,15 @@
  * read in one place. The model is:
  *
  *   horizontal movement navigates   (left = next, right = previous)
- *   a tap, or a clear vertical swipe, flips
+ *   a tap flips
+ *   vertical movement is never ours — it scrolls a long card
+ *
+ * There used to be a vertical swipe-to-flip as well, live only while the face
+ * fit without scrolling. It duplicated the tap, and it made the same movement
+ * mean two different things depending on content length — which on a phone
+ * changes when it rotates, since a face that fits in portrait scrolls in
+ * landscape. It was dropped so vertical movement is always, predictably, the
+ * browser's scroll.
  *
  * Nothing overloads horizontal movement with flipping, and a gesture that is
  * too diagonal to call does nothing at all rather than guessing.
@@ -35,9 +43,6 @@ export const FLICK_MIN_VELOCITY = 0.45;
 /** Moving back toward the start at this speed on release reads as "never mind". */
 export const REVERSAL_VELOCITY = 0.3;
 
-/** Vertical travel that flips the card without needing a flick. */
-export const VERTICAL_FLIP_DISTANCE = 56;
-
 export type Axis = "x" | "y";
 export type AxisLock = Axis | "none" | null;
 
@@ -65,56 +70,40 @@ export function swipeDistanceThreshold(cardWidth: number): number {
   return Math.min(110, Math.max(64, cardWidth * 0.22));
 }
 
-export type ReleaseOutcome = "next" | "previous" | "flip" | "edge" | "cancel";
+export type ReleaseOutcome = "next" | "previous" | "edge" | "cancel";
 
 export interface ReleaseInput {
   axis: AxisLock;
   dx: number;
-  dy: number;
   /** Release velocity in px/ms. */
   vx: number;
-  vy: number;
   cardWidth: number;
   canGoPrevious: boolean;
   canGoNext: boolean;
-  /** False when the card's content scrolls: vertical movement then belongs to the scroll. */
-  verticalFlip: boolean;
 }
 
 /**
- * What a released gesture means.
+ * What a released gesture means. Taps are not releases: they arrive as clicks.
  *
  * "edge" is a committed swipe toward a card that does not exist (past either
  * end of the deck): the card springs back and the UI may say why.
  */
 export function classifyRelease(input: ReleaseInput): ReleaseOutcome {
-  const { axis, dx, dy, vx, vy } = input;
+  const { axis, dx, vx } = input;
+  if (axis !== "x") return "cancel";
 
-  if (axis === "x") {
-    const distance = Math.abs(dx);
-    // Pulling back toward the start while letting go: the user changed their mind.
-    if (Math.sign(vx) === -Math.sign(dx) && Math.abs(vx) >= REVERSAL_VELOCITY) return "cancel";
+  const distance = Math.abs(dx);
+  // Pulling back toward the start while letting go: the user changed their mind.
+  if (Math.sign(vx) === -Math.sign(dx) && Math.abs(vx) >= REVERSAL_VELOCITY) return "cancel";
 
-    const flick =
-      distance >= FLICK_MIN_DISTANCE &&
-      Math.abs(vx) >= FLICK_MIN_VELOCITY &&
-      Math.sign(vx) === Math.sign(dx);
-    if (distance < swipeDistanceThreshold(input.cardWidth) && !flick) return "cancel";
+  const flick =
+    distance >= FLICK_MIN_DISTANCE &&
+    Math.abs(vx) >= FLICK_MIN_VELOCITY &&
+    Math.sign(vx) === Math.sign(dx);
+  if (distance < swipeDistanceThreshold(input.cardWidth) && !flick) return "cancel";
 
-    if (dx < 0) return input.canGoNext ? "next" : "edge";
-    return input.canGoPrevious ? "previous" : "edge";
-  }
-
-  if (axis === "y" && input.verticalFlip) {
-    const distance = Math.abs(dy);
-    const flick =
-      distance >= FLICK_MIN_DISTANCE &&
-      Math.abs(vy) >= FLICK_MIN_VELOCITY &&
-      Math.sign(vy) === Math.sign(dy);
-    return distance >= VERTICAL_FLIP_DISTANCE || flick ? "flip" : "cancel";
-  }
-
-  return "cancel";
+  if (dx < 0) return input.canGoNext ? "next" : "edge";
+  return input.canGoPrevious ? "previous" : "edge";
 }
 
 /**

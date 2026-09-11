@@ -32,6 +32,7 @@ import { OverflowMenu } from "@/components/ui/menu";
 import { LogoMark } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { cn } from "@/lib/utils";
+import { useInstalledDisplay } from "@/lib/display-mode";
 import { ApkgParseError, parseApkgFile } from "@/lib/flashcards/client-import";
 import {
   deleteAllUploadedDecks,
@@ -83,6 +84,7 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [decks, setDecks] = useState<UploadedDeckMeta[] | null>(null);
+  const installed = useInstalledDisplay();
   const [dragging, setDragging] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
   const [persistence, setPersistence] = useState<PersistenceState>({ status: "unsupported" });
@@ -427,6 +429,11 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
                   browser profile.
                 </li>
                 <li>Clearing this site&apos;s browser data will remove locally saved decks.</li>
+                <li>
+                  {installed
+                    ? "You opened Flashcards for All from your Home Screen. It may keep its own storage, separate from your browser's, so a deck imported in the browser may need importing again here."
+                    : "A copy added to your Home Screen may keep its own separate storage (iPhone and iPad do), so you may need to import your decks again there."}
+                </li>
                 {persistence.status === "persisted" && (
                   <li>
                     This browser has granted persistent storage, so it will not evict saved decks on

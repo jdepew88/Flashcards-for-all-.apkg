@@ -47,3 +47,10 @@ export function useMediaQuery(query: string): boolean {
 export function usePrefersReducedMotion(): boolean {
   return useMediaQuery(REDUCED_MOTION_QUERY);
 }
+
+/**
+ * A phone held sideways: little height to spare. Combined with COMPACT_QUERY,
+ * it moves Buttons-mode controls from a bottom strip to rails at either side,
+ * where landscape has room and thumbs already rest.
+ */
+export const PHONE_LANDSCAPE_QUERY = "(orientation: landscape) and (max-height: 500px)";

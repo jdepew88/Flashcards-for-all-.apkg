@@ -30,8 +30,13 @@ const deck: FlashcardDeck = {
   ],
 };
 
+/** "2 / 4" — the in-card position ("2 ─── 4"), or "0 / 0" when no card shows. */
 function counter() {
-  return screen.getByTestId("card-counter").textContent?.replace(/\s+/g, " ").trim();
+  const position = screen.queryByTestId("card-position");
+  if (!position) return "0 / 0";
+  const current = within(position).getByTestId("card-position-current").textContent;
+  const total = within(position).getByTestId("card-position-total").textContent;
+  return `${current} / ${total}`;
 }
 
 function isFlipped() {
@@ -63,7 +68,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("rendering", () => {
-  it("shows the deck title, the first card and the total count", () => {
+  it("shows the deck title, the first card and its position in the run", () => {
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
     expect(screen.getByTitle("Test Deck")).toBeInTheDocument();
