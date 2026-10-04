@@ -201,9 +201,13 @@ the original `.apkg`. The choice is remembered in this browser.
 ### Light and Dark
 
 Two designed palettes from one set of semantic tokens (`src/styles.css`):
-**Paper & Moss** (warm near-white paper, a bright card, moss-green accent) and
-**Slate & Moss** (deep green-grey slate, the card lifted slightly off the page,
-a softer moss). The sun/moon toggle stores an explicit choice in this browser;
+**Night desk** (dark — deep navy and teal, a warm lamp, stars, translucent
+panels, mint for action and gold for small accents) and **Morning desk** (light
+— the same desk in daylight). The flashcard itself is the same cream cardstock
+with dark brown ink in both; inside a card the semantic tokens are re-pointed
+at ink-on-paper values (`.paper`). The room behind the page
+(`src/components/ui/scenery.tsx`) is CSS gradients plus a few kilobytes of
+inline SVG — no image requests, no web fonts. The sun/moon toggle stores an explicit choice in this browser;
 with no choice the page follows the operating system. `public/theme-init.js`
 applies a stored choice before first paint, so there is no flash of the wrong
 theme — it is a same-origin file rather than inline code, so the CSP needed no
@@ -228,14 +232,18 @@ also created a new 3D compositing layer on its first frame. Now nothing relies
 on backface-visibility, and the shell's transform is always a 3D transform, so
 its layer exists before a flip starts.
 
-Moving between cards is a carousel: while you drag, the neighbouring card rides
-alongside; on release the two slide with the same timing, so the incoming card
-is complete and on screen before the outgoing one leaves, and no frame shows an
-empty stage. Neighbouring cards are rendered ahead of time — sanitized, link
-policy applied, images decoded — so a move never parses HTML mid-animation.
+Moving between cards is a different movement, so it cannot be mistaken for a
+flip: the card on top is moved a short way aside — to the right for Next, to
+the left for Previous — turning a few degrees and fading, while the next card
+comes forward from the stack beneath it. A swiped card continues the way it
+was thrown. Timings and targets live in `src/lib/motion.ts`. Neighbouring cards
+are rendered ahead of time — sanitized, link policy applied, images decoded —
+so a move never parses HTML mid-animation. Position and flip state are plain
+React state; the animation follows them and can be interrupted at any point,
+and a held key steps at a readable pace instead of racing through the deck.
 
 With `prefers-reduced-motion: reduce`, the face swaps in place and cards
-cross-fade instead of sliding — every action works the same.
+cross-fade in place — every action works the same.
 
 ---
 

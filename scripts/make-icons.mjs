@@ -1,7 +1,7 @@
 // Builds the Home Screen / install icons in public/icons from the app mark.
 //
-// The mark is the same drawing as public/favicon.svg and the in-app LogoMark —
-// two stacked cards on a moss tile — rasterised here in plain Node (no image
+// The mark is the same drawing as public/favicon.svg — a cream flashcard over
+// a mint one, on a night-navy tile — rasterised here in plain Node (no image
 // library, no browser) so the PNGs are reproducible from the repository alone.
 // Each pixel is 4×4 supersampled against signed-distance shapes.
 //
@@ -22,9 +22,10 @@ import { deflateSync } from "node:zlib";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = resolve(root, "public/icons");
 
-const MOSS = [0x3d, 0x6b, 0x3f];
-const PAPER = [0xff, 0xfe, 0xfb];
-const WHITE = [0xff, 0xff, 0xff];
+const NAVY = [0x0d, 0x22, 0x38];
+const PAPER = [0xf6, 0xec, 0xd6];
+const MINT = [0x8f, 0xd6, 0xbf];
+const INK = [0x2a, 0x20, 0x18];
 
 /** Signed distance to a rounded rectangle; negative inside. */
 function roundRect(px, py, x, y, w, h, r) {
@@ -54,18 +55,18 @@ function rotateAbout(px, py, cx, cy, degrees) {
  */
 function markLayers(tileRadius) {
   return [
-    (u, v) => (tileRadius === null || roundRect(u, v, 0, 0, 32, 32, tileRadius) <= 0 ? [MOSS, 1] : null),
+    (u, v) => (tileRadius === null || roundRect(u, v, 0, 0, 32, 32, tileRadius) <= 0 ? [NAVY, 1] : null),
     (u, v) => {
       // favicon: rect rotated -9° about (14, 18.5); test the point rotated back.
       const [ru, rv] = rotateAbout(u, v, 14, 18.5, 9);
-      return roundRect(ru, rv, 6.5, 10, 15, 17, 3) <= 0 ? [WHITE, 0.5] : null;
+      return roundRect(ru, rv, 6.5, 10, 15, 17, 3) <= 0 ? [MINT, 1] : null;
     },
     (u, v) => (roundRect(u, v, 10.5, 6.5, 15, 17, 3) <= 0 ? [PAPER, 1] : null),
     (u, v) =>
       segment(u, v, 14, 12.5, 22, 12.5, 1.6) <= 0 ||
       segment(u, v, 14, 15.5, 22, 15.5, 1.6) <= 0 ||
       segment(u, v, 14, 18.5, 19, 18.5, 1.6) <= 0
-        ? [MOSS, 1]
+        ? [INK, 1]
         : null,
   ];
 }

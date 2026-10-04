@@ -23,7 +23,7 @@ export type Theme = "light" | "dark";
 export const THEME_STORAGE_KEY = "flashcards:theme";
 
 /** Browser-chrome colours (mobile address bar), matched to --background in styles.css. */
-export const THEME_COLORS = { light: "#f3f2ec", dark: "#101412" } as const;
+export const THEME_COLORS = { light: "#e7eef0", dark: "#0a1728" } as const;
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

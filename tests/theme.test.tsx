@@ -46,8 +46,8 @@ beforeEach(() => {
   localStorage.clear();
   delete root.dataset.theme;
   document.head.innerHTML =
-    '<meta name="theme-color" content="#f3f2ec" media="(prefers-color-scheme: light)">' +
-    '<meta name="theme-color" content="#101412" media="(prefers-color-scheme: dark)">';
+    `<meta name="theme-color" content="${THEME_COLORS.light}" media="(prefers-color-scheme: light)">` +
+    `<meta name="theme-color" content="${THEME_COLORS.dark}" media="(prefers-color-scheme: dark)">`;
   setMedia();
 });
 
@@ -190,19 +190,33 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-/** [text colour, background] pairs that real text in the UI is set on. */
+/**
+ * [text colour, background] pairs that real text in the UI is set on.
+ *
+ * A flashcard is cream cardstock in both themes, with its own ink: text on a
+ * card is --card-foreground / --card-muted / --card-accent (styles.css points
+ * the semantic tokens at these inside .paper), never the page's --foreground.
+ */
 const TEXT_PAIRS: [string, string][] = [
   ["--foreground", "--background"],
-  ["--foreground", "--card"],
-  ["--foreground", "--card-back"],
+  ["--card-foreground", "--card"],
+  ["--card-foreground", "--card-back"],
+  ["--card-foreground", "--card-well"],
+  ["--card-muted", "--card"],
+  ["--card-muted", "--card-back"],
+  ["--card-muted", "--card-well"],
+  ["--card-accent", "--card"],
+  ["--card-accent", "--card-back"],
+  ["--card-accent", "--card-accent-soft"],
+  ["--primary-ink", "--primary-from"],
+  ["--primary-ink", "--primary-to"],
   ["--foreground", "--surface-elevated"],
+  ["--foreground", "--surface-muted"],
   ["--foreground-muted", "--background"],
-  ["--foreground-muted", "--card"],
   ["--foreground-muted", "--surface"],
   ["--foreground-muted", "--surface-elevated"],
   ["--foreground-muted", "--surface-muted"],
   ["--accent", "--background"],
-  ["--accent", "--card-back"],
   ["--accent", "--surface-elevated"],
   ["--accent", "--accent-soft"],
   ["--accent-foreground", "--accent"],

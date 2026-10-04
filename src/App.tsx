@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { UploadScreen } from "@/components/upload-screen";
 import { StudyScreen } from "@/components/study-screen";
+import { Scenery } from "@/components/ui/scenery";
 
 const STUDY_PREFIX = "#/study/";
 
@@ -40,5 +41,11 @@ export function App() {
     setSlug(null);
   }, []);
 
-  return slug ? <StudyScreen slug={slug} onExit={exit} /> : <UploadScreen onStudy={study} />;
+  return (
+    <>
+      {/* The room both screens sit in: sky, lamp light, desk. Decoration only. */}
+      <Scenery />
+      {slug ? <StudyScreen slug={slug} onExit={exit} /> : <UploadScreen onStudy={study} />}
+    </>
+  );
 }

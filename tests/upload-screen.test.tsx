@@ -85,15 +85,34 @@ afterEach(async () => {
 });
 
 describe("what the page says", () => {
-  it("leads with the title, the promise and the primary action", () => {
+  it("leads with the product's name, the promise and the two ways in", () => {
     render(<UploadScreen onStudy={vi.fn()} />);
 
+    // Spelled out — "for", never "4" — and a real heading, not a picture of one.
+    expect(screen.getByRole("heading", { level: 1, name: "Flashcards for All" })).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { level: 1, name: "Study any Anki deck, privately." })
+      screen.getByText("Study smarter with simple, beautiful flashcards.")
     ).toBeInTheDocument();
     expect(screen.getByText(/study it right here in your browser/i)).toBeInTheDocument();
-    // The primary action is the file picker itself, labelled "Import .apkg".
+    // One way in is the sample deck; the other is the file picker itself,
+    // labelled "Import .apkg".
+    expect(screen.getByRole("button", { name: /try a sample deck/i })).toBeEnabled();
     expect(screen.getByLabelText(/Import \.apkg/)).toBe(fileInput());
+  });
+
+  it("describes a flashcard tool, with no spelling-test language", () => {
+    const { container } = render(<UploadScreen onStudy={vi.fn()} />);
+
+    expect(container.textContent).not.toMatch(/spell|word list|flashcards 4 all/i);
+  });
+
+  it("explains how it works with a picture that has a text alternative", () => {
+    render(<UploadScreen onStudy={vi.fn()} />);
+
+    expect(screen.getByRole("heading", { name: "Study with your own decks" })).toBeInTheDocument();
+    // The one place both sides of a card are shown at once: an explanatory
+    // diagram, described in words for anyone who cannot see it.
+    expect(screen.getByRole("img", { name: /front.*flipping the card shows its back/i })).toBeInTheDocument();
   });
 
   it("states the local-processing promise next to the import control", () => {

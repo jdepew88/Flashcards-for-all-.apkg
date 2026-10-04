@@ -11,8 +11,12 @@
 //     controls float over the card's top-right corner: Full screen and Study
 //     options. Everything secondary, including Back to your decks, is in the
 //     Study options sheet.
-//   * Tablet / desktop: a compact header (back, title, full screen, theme,
-//     options), the card, Previous / Flip / Next, and keyboard hints.
+//   * Tablet / desktop: the study desk. A slim top bar (back, the wordmark,
+//     full screen, theme, options), a deck panel (title, what is being
+//     studied, "Card 3 of 5" with its progress, how many are known), then one
+//     large card with the rest of the deck fanned beneath it, and a control
+//     panel: Previous / Flip / Next with the keyboard hints. Here the card's
+//     position is in the deck panel, so the card itself stays a clean card.
 //   * Immersive ("Full screen"), any size: the app's own chrome goes — header,
 //     title, hints — leaving the card and one floating Study options control.
 //     Where the Fullscreen API is genuinely available (desktop, Android, iPad)
@@ -32,6 +36,13 @@
 //   * Keyboard: ← → move, Space / Enter / ↑ / ↓ flip, K marks known, Escape
 //     leaves immersive mode. Keys are left alone while a form control, player
 //     or dialog has them, and whenever a modifier is held (Alt+← is Back).
+//     A held key does not machine-gun: a held flip key flips once, and held
+//     arrows step at a readable pace.
+//
+// Position and flip state live here, in React state, and are the only truth.
+// The card's animations (swipe-card.tsx) follow that state and can be
+// interrupted at any point without it being wrong: a card is keyed by its id,
+// so pressing Next ten times moves exactly ten cards whatever is mid-flight.
 //
 // Rotating the device changes only layout: position, flip state and the scroll
 // position inside the card all live in state that no layout change touches.
@@ -52,13 +63,17 @@ import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
+  Lightbulb,
   Maximize2,
   RefreshCw,
   SlidersHorizontal,
   SquarePlus,
+  Star,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/primitives";
+import { Wordmark } from "@/components/ui/logo";
+import { DoodleArrow, DoodleBook, HandNote } from "@/components/ui/decor";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SwipeCard, type CardMotion } from "@/components/swipe-card";
 import { FlashcardOptionsSheet } from "@/components/flashcard-options-sheet";
@@ -85,6 +100,7 @@ import {
   usePrefersReducedMotion,
 } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
+import { KEY_REPEAT_INTERVAL_MS } from "@/lib/motion";
 import type { Flashcard, FlashcardDeck } from "@/lib/flashcards/types";
 
 function shuffleArray<T>(items: T[]): T[] {
@@ -120,7 +136,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const [position, setPosition] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [direction, setDirection] = useState<-1 | 0 | 1>(0);
-  // Where a swiped card was let go, so the incoming card starts beside it.
+  // Where a swiped card was let go, so it leaves from there.
   const [releaseX, setReleaseX] = useState(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -134,6 +150,8 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
   // True while this screen holds the browser's real full screen.
   const holdsFullscreen = useRef(false);
+  // When a held arrow key last moved a card.
+  const lastRepeatMove = useRef(0);
 
   const compact = useMediaQuery(COMPACT_QUERY);
   const landscape = useMediaQuery(PHONE_LANDSCAPE_QUERY);
@@ -209,18 +227,12 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const showShortcutHint = finePointer && !compact;
 
   const motionCustom = useMemo<CardMotion>(
-    () => ({ direction, width: cardWidth, reduced, offset: releaseX, gap: compact ? 12 : 24 }),
-    [direction, cardWidth, reduced, releaseX, compact]
+    () => ({ direction, width: cardWidth, reduced, offset: releaseX }),
+    [direction, cardWidth, reduced, releaseX]
   );
-
-  const neighbour = (at: number) => {
-    const index = order[at];
-    if (index === undefined) return null;
-    const card = deck.cards[index];
-    return { card, known: knownSet.has(card.id) };
-  };
-  const previousCard = neighbour(position - 1);
-  const nextCard = neighbour(position + 1);
+  // The desk layout: one landscape card with the rest of the deck beneath it.
+  const desk = !compact && !immersive;
+  const stackDepth = desk && currentCard ? Math.min(3, Math.max(0, remaining)) : 0;
 
   // The study screen is a fixed-height app shell; while it is up, the page
   // must not scroll or overscroll (pull-to-refresh, horizontal history swipes).
@@ -407,32 +419,43 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
       );
       const inScrollingCard = !!target?.closest(".card-scroll");
 
+      // A held key repeats some thirty times a second. Holding an arrow steps
+      // through the deck at a pace the eye can follow; holding a flip or
+      // known key acts once, rather than flickering back and forth.
+      const heldMove = () => {
+        if (!event.repeat) return true;
+        const now = performance.now();
+        if (now - lastRepeatMove.current < KEY_REPEAT_INTERVAL_MS) return false;
+        lastRepeatMove.current = now;
+        return true;
+      };
+
       switch (event.key) {
         case "ArrowRight":
           event.preventDefault();
-          go(1);
+          if (heldMove()) go(1);
           break;
         case "ArrowLeft":
           event.preventDefault();
-          go(-1);
+          if (heldMove()) go(-1);
           break;
         case "ArrowUp":
         case "ArrowDown":
           // A focused scrollable card uses these to scroll.
           if (onControl || inScrollingCard) return;
           event.preventDefault();
-          flip();
+          if (!event.repeat) flip();
           break;
         case " ":
         case "Enter":
           // A focused button already acts on Space/Enter; flipping too would double up.
           if (onControl) return;
           event.preventDefault();
-          flip();
+          if (!event.repeat) flip();
           break;
         case "k":
         case "K":
-          toggleKnown();
+          if (!event.repeat) toggleKnown();
           break;
         case "Escape":
           if (!immersive) return;
@@ -474,55 +497,96 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
       data-orientation={phoneLandscape ? "landscape" : "portrait"}
     >
       {showHeader ? (
-        <header className="safe-top mx-auto flex w-full max-w-3xl items-center gap-1 pb-1 sm:gap-2 sm:pb-2">
-          <button
-            type="button"
-            onClick={onExit}
-            aria-label="Back to your decks"
-            className="-ml-1.5 inline-flex h-11 shrink-0 items-center gap-0.5 rounded-full pl-1.5 pr-2 text-sm font-medium text-muted transition-[background-color,color,transform] duration-150 hover:bg-surface-muted hover:text-foreground active:scale-95 sm:pr-3.5"
-          >
-            <ChevronLeft className="h-5 w-5" />
-            <span className="hidden sm:inline">Decks</span>
-          </button>
+        <header className="safe-top mx-auto w-full max-w-[60rem] shrink-0">
+          <div className="flex items-center gap-1 pb-2 sm:gap-2">
+            <button
+              type="button"
+              onClick={onExit}
+              aria-label="Back to your decks"
+              className="-ml-1.5 inline-flex h-11 shrink-0 items-center gap-0.5 rounded-full pl-1.5 pr-2 text-sm font-medium text-muted transition-[background-color,color,transform] duration-150 hover:bg-control hover:text-foreground active:scale-95 sm:pr-3.5"
+            >
+              <ChevronLeft className="h-5 w-5" />
+              <span className="hidden sm:inline">Decks</span>
+            </button>
 
-          <div className="min-w-0 flex-1 px-1 text-center">
-            <h1 className="truncate text-[15px] font-semibold leading-tight" title={deck.title}>
-              {deck.title}
-            </h1>
-            {filterSummary && (
-              <button
-                type="button"
-                onClick={() => setOptionsOpen(true)}
-                className="mx-auto mt-0.5 block max-w-full truncate text-xs font-medium text-accent"
-              >
-                {filterSummary}
-              </button>
-            )}
+            <div className="flex min-w-0 flex-1 justify-center">
+              <Wordmark compact />
+            </div>
+
+            <button
+              ref={fullscreenButtonRef}
+              type="button"
+              onClick={enterImmersive}
+              aria-label="Full screen"
+              title="Full screen"
+              className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-full px-2.5 text-sm font-medium text-muted transition-[background-color,color,transform] duration-150 hover:bg-control hover:text-foreground active:scale-95"
+            >
+              <Maximize2 className="h-[18px] w-[18px]" />
+            </button>
+            <ThemeToggle className="h-11 w-11" />
+            <button
+              ref={optionsTriggerRef}
+              type="button"
+              onClick={() => setOptionsOpen(true)}
+              aria-label="Study options"
+              aria-haspopup="dialog"
+              aria-expanded={optionsOpen}
+              className="-mr-1.5 inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-full px-2.5 text-sm font-medium text-muted transition-[background-color,color,transform] duration-150 hover:bg-control hover:text-foreground active:scale-95 sm:mr-0 sm:px-3.5"
+            >
+              <SlidersHorizontal className="h-[18px] w-[18px]" />
+              <span className="hidden sm:inline">Options</span>
+            </button>
           </div>
 
-          <button
-            ref={fullscreenButtonRef}
-            type="button"
-            onClick={enterImmersive}
-            aria-label="Full screen"
-            title="Full screen"
-            className="inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-full px-2.5 text-sm font-medium text-muted transition-[background-color,color,transform] duration-150 hover:bg-surface-muted hover:text-foreground active:scale-95"
-          >
-            <Maximize2 className="h-[18px] w-[18px]" />
-          </button>
-          <ThemeToggle className="h-11 w-11" />
-          <button
-            ref={optionsTriggerRef}
-            type="button"
-            onClick={() => setOptionsOpen(true)}
-            aria-label="Study options"
-            aria-haspopup="dialog"
-            aria-expanded={optionsOpen}
-            className="-mr-1.5 inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-full px-2.5 text-sm font-medium text-muted transition-[background-color,color,transform] duration-150 hover:bg-surface-muted hover:text-foreground active:scale-95 sm:mr-0 sm:px-3.5"
-          >
-            <SlidersHorizontal className="h-[18px] w-[18px]" />
-            <span className="hidden sm:inline">Options</span>
-          </button>
+          {/* The deck panel: what is being studied, and how far through it. */}
+          <div className="panel mx-auto flex w-full max-w-[46rem] items-center gap-4 px-4 py-3 sm:px-6 sm:py-3.5">
+            <DoodleBook className="hidden h-11 w-14 shrink-0 text-accent sm:block" />
+            <div className="min-w-0 flex-1">
+              <p className="eyebrow text-[0.66rem]">Studying</p>
+              <h1
+                className="mt-1 truncate font-display text-[1.3rem] font-bold leading-tight"
+                title={deck.title}
+              >
+                {deck.title}
+              </h1>
+              <div className="study-deck-meta mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-muted">
+                <span className="shrink-0 tabular-nums">
+                  {total} {total === 1 ? "card" : "cards"}
+                </span>
+                {filterSummary && (
+                  <>
+                    <span aria-hidden>•</span>
+                    <button
+                      type="button"
+                      onClick={() => setOptionsOpen(true)}
+                      className="min-w-0 truncate font-medium text-accent"
+                    >
+                      {filterSummary}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="w-36 shrink-0 sm:w-52" data-testid="deck-progress">
+              <div className="flex items-baseline justify-between gap-2 text-sm tabular-nums">
+                {/* Read out from inside the card ("Card 3 of 5"), so not twice. */}
+                <span aria-hidden className="font-medium">
+                  {currentCard ? `Card ${position + 1} of ${total}` : "No cards"}
+                </span>
+                <span className="inline-flex items-center gap-1 text-[13px] text-muted">
+                  <Star aria-hidden className="h-3.5 w-3.5 text-gold" />
+                  <span>{knownSet.size} known</span>
+                </span>
+              </div>
+              <div aria-hidden className="mt-2 h-2 overflow-hidden rounded-full bg-background/60 ring-1 ring-panel-border">
+                <div
+                  className="h-full w-full origin-left rounded-full bg-accent transition-transform duration-300 ease-out"
+                  style={{ transform: `scaleX(${currentCard && total > 0 ? (position + 1) / total : 0})` }}
+                />
+              </div>
+            </div>
+          </div>
         </header>
       ) : (
         // Not shown, but still the page's heading for anyone navigating by them.
@@ -533,31 +597,69 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
         className={cn(
           "flex min-h-0 flex-1 flex-col",
           !compact && "items-center justify-center",
-          !compact && (immersive ? "pt-1" : "pt-4 sm:pt-6")
+          !compact && immersive && "pt-1"
         )}
       >
-        <div className="relative flex min-h-0 w-full flex-1 justify-center">
+        <div
+          className={cn(
+            "relative flex min-h-0 w-full flex-1 justify-center",
+            desk && "items-center py-5"
+          )}
+        >
+          {desk && currentCard && (
+            // Asides in the margin, where the window is wide enough for them.
+            <>
+              <div className="absolute right-[calc(50%+22.75rem)] top-[10%] hidden w-40 -rotate-6 flex-col items-end xl:flex">
+                <DoodleArrow className="mr-6 h-7 w-14 text-hand opacity-70" />
+                <HandNote className="mt-1 text-right">
+                  {flipped ? "Did you have it?" : "Think of the answer…"}
+                </HandNote>
+              </div>
+              <div className="absolute left-[calc(50%+22.75rem)] top-[58%] hidden w-40 rotate-3 flex-col items-start xl:flex">
+                <DoodleArrow flip className="ml-2 h-7 w-14 text-hand opacity-70" />
+                <HandNote className="mt-1">
+                  {flipped ? "Flip back any time" : "Flip to see the answer"}
+                </HandNote>
+              </div>
+            </>
+          )}
+
           <div
             ref={stageRef}
             data-testid="study-stage"
             className={cn(
               "relative min-h-0 w-full flex-1",
-              !compact && !immersive && "max-w-[40rem] sm:max-h-[38rem]",
+              // A landscape flashcard, capped so lines stay readable; on a
+              // short window it gives up height before it gives up width.
+              desk && "aspect-[3/2] max-h-full max-w-[40rem]",
               !compact && immersive && "max-w-[60rem]",
               phoneLandscape && buttonsMode && "mx-16"
             )}
           >
-            {/* The rest of the deck, peeking out underneath (roomy layouts only). */}
-            {!compact && !immersive && currentCard && remaining >= 2 && (
+            {/* The rest of the deck, fanned beneath the card: silhouettes
+                only — as many as there are cards left, up to three. */}
+            {stackDepth >= 3 && (
               <div
                 aria-hidden
-                className="absolute inset-x-5 -bottom-3 top-5 rounded-[1.75rem] border border-card-border bg-card opacity-55"
+                data-testid="deck-stack"
+                className="paper paper-flat paper-blue absolute inset-0"
+                style={{ transform: "translate(16px, 7px) rotate(4.5deg)" }}
               />
             )}
-            {!compact && !immersive && currentCard && remaining >= 1 && (
+            {stackDepth >= 2 && (
               <div
                 aria-hidden
-                className="absolute inset-x-2.5 -bottom-1.5 top-2.5 rounded-[1.75rem] border border-card-border bg-card shadow-soft"
+                data-testid="deck-stack"
+                className="paper paper-flat paper-mint absolute inset-0"
+                style={{ transform: "translate(-13px, 11px) rotate(-3.2deg)" }}
+              />
+            )}
+            {stackDepth >= 1 && (
+              <div
+                aria-hidden
+                data-testid="deck-stack"
+                className="paper paper-flat paper-tan absolute inset-0"
+                style={{ transform: "translate(9px, -7px) rotate(2deg)" }}
               />
             )}
 
@@ -578,8 +680,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                   linkMode={cardLinks}
                   compact={compact}
                   controlsInset={controlsInset}
-                  previousCard={previousCard}
-                  nextCard={nextCard}
+                  showPosition={!desk}
                   onFlip={flip}
                   onNavigate={go}
                   onEdge={(step) => go(step)}
@@ -588,8 +689,8 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                 />
               </AnimatePresence>
             ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 rounded-[1.75rem] border border-dashed border-border-strong p-8 text-center">
-                <p className="text-[15px] font-semibold">No cards match this filter.</p>
+              <div className="panel absolute inset-0 flex flex-col items-center justify-center gap-3 border-dashed p-8 text-center">
+                <p className="font-display text-xl font-bold">No cards match this filter.</p>
                 <p className="max-w-xs text-sm text-muted">
                   {hideKnown
                     ? "Every card in this selection is marked known."
@@ -739,34 +840,56 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
         </div>
 
         {buttonsMode && !phoneLandscape ? (
-          <nav
-            aria-label="Card controls"
-            data-testid="control-bar"
-            data-variant={compact ? "strip" : "bar"}
+          <div
             className={cn(
-              "mx-auto grid w-full grid-cols-[1fr_auto_1fr] items-center",
-              compact ? "mt-2 gap-2" : "mt-5 max-w-[40rem] gap-2 sm:mt-7 sm:gap-3"
+              "mx-auto w-full shrink-0",
+              compact ? "mt-2.5" : "panel max-w-[46rem] px-3.5 py-3.5 sm:px-5",
+              !compact && immersive && "mt-4"
             )}
           >
-            <Button variant="secondary" size="lg" onClick={cardControls.onPrevious} disabled={!cardControls.canPrevious}>
-              <ArrowLeft className="h-4 w-4" />
-              Previous
-            </Button>
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={cardControls.onFlip}
-              disabled={!cardControls.canFlip}
-              className="min-w-[6.5rem] px-6 sm:min-w-32"
+            <nav
+              aria-label="Card controls"
+              data-testid="control-bar"
+              data-variant={compact ? "strip" : "bar"}
+              className={cn(
+                "grid w-full items-center",
+                compact ? "grid-cols-[1fr_auto_1fr] gap-2" : "grid-cols-[1fr_1.4fr_1fr] gap-2.5 sm:gap-3.5"
+              )}
             >
-              <RefreshCw className="h-4 w-4" />
-              Flip
-            </Button>
-            <Button variant="secondary" size="lg" onClick={cardControls.onNext} disabled={!cardControls.canNext}>
-              Next
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </nav>
+              <Button variant="secondary" size="lg" onClick={cardControls.onPrevious} disabled={!cardControls.canPrevious}>
+                <ArrowLeft className="h-4 w-4" />
+                Previous
+              </Button>
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={cardControls.onFlip}
+                disabled={!cardControls.canFlip}
+                className={cn("font-display text-[1.05rem]", compact && "min-w-[7rem] px-6")}
+              >
+                <RefreshCw className="h-[18px] w-[18px]" />
+                Flip
+              </Button>
+              <Button variant="secondary" size="lg" onClick={cardControls.onNext} disabled={!cardControls.canNext}>
+                Next
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </nav>
+
+            {showHeader && showShortcutHint && (
+              <div className="mt-3 hidden items-center justify-center gap-1.5 text-[13px] text-muted md:flex">
+                <kbd className="kbd">←</kbd>
+                <kbd className="kbd">→</kbd>
+                <span>move</span>
+                <span aria-hidden className="mx-2 h-3.5 w-px bg-border-strong" />
+                <kbd className="kbd">Space</kbd>
+                <span>flip</span>
+                <span aria-hidden className="mx-2 h-3.5 w-px bg-border-strong" />
+                <kbd className="kbd">K</kbd>
+                <span>mark known</span>
+              </div>
+            )}
+          </div>
         ) : !buttonsMode ? (
           // Gesture mode: no button bar taking space from the card, but the
           // same actions stay reachable by keyboard and assistive technology,
@@ -790,18 +913,12 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
         ) : null}
 
         {showHeader && (
-          <div className="mt-4 flex min-h-7 items-center justify-center gap-2.5 text-[13px] tabular-nums text-muted sm:mt-5">
-            <span>{knownSet.size} known</span>
-            {showShortcutHint && (
-              <span className="ml-4 hidden items-center gap-1.5 md:inline-flex">
-                <kbd className="kbd">←</kbd>
-                <kbd className="kbd">→</kbd>
-                <span className="mr-2">move</span>
-                <kbd className="kbd">Space</kbd>
-                <span>flip</span>
-              </span>
-            )}
-          </div>
+          <p className="study-tip panel mx-auto mt-3 flex w-full max-w-[40rem] shrink-0 items-center gap-3 rounded-2xl px-4 py-2.5 text-sm text-muted">
+            <Lightbulb aria-hidden className="h-[18px] w-[18px] shrink-0 text-gold" />
+            {flipped
+              ? "Knew it? Mark it known on the card, then move on to the next one."
+              : "Take your time. Read the card, think of the answer, then turn it over."}
+          </p>
         )}
       </main>
 
@@ -890,7 +1007,7 @@ function FloatingButton({
       aria-expanded={expanded}
       className="group flex h-11 w-11 items-center justify-center rounded-full text-muted transition-colors hover:text-foreground"
     >
-      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-muted/80 transition-[background-color,transform] duration-150 group-hover:bg-surface-muted group-active:scale-90">
+      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-surface-muted/85 shadow-soft transition-[background-color,transform] duration-150 group-hover:bg-surface-muted group-active:scale-90">
         {children}
       </span>
     </button>

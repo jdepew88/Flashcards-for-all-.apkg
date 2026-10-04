@@ -7,16 +7,21 @@
 // every page load. The reading-options sheet and its persisted preference work
 // exactly as before; only the typefaces differ.
 
+//
+// The first entry is the default: the same display serif the wordmark and
+// headings use (--font-display in styles.css), so a card's term and the site's
+// name are visibly one family.
+
 export const FLASHCARD_FONTS = [
+  {
+    id: "serif",
+    label: "Serif",
+    variable: '"Iowan Old Style", Charter, "Bitstream Charter", Georgia, "Times New Roman", serif',
+  },
   {
     id: "sans",
     label: "Sans",
     variable: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  },
-  {
-    id: "serif",
-    label: "Serif",
-    variable: 'Georgia, "Iowan Old Style", "Times New Roman", Times, serif',
   },
   {
     id: "mono",

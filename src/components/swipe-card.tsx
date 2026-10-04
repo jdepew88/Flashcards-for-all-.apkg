@@ -25,13 +25,23 @@
 // browser's everywhere, horizontal movement is the card's everywhere except on
 // a table or code block that actually overflows sideways.
 //
-// The flip. The card's shell — background, border, shadow and the position
-// footer — is one element that stays mounted for the life of the card; only
-// which face is painted changes. A flip turns the shell edge-on (rotateY
-// 0 → 90°), swaps the painted face at the instant the shell is invisible, and
-// turns it back (-90° → 0). Both faces stay in the DOM throughout, so a flip
-// is never a remount, a layout change or a size change, and there is never a
-// frame with mirrored text, both faces, or neither.
+// The card is cardstock (.paper in styles.css): cream, with a printed inset
+// rule, a little thickness and a cast shadow. The front is cream and the back
+// a cooler, mint-tinted paper, so which side is up is plain at a glance. A
+// short question or term is set as display type, as large as the card allows
+// (src/lib/flashcards/card-layout.ts); anything longer reads as a document.
+//
+// Three movements, deliberately unlike each other (timings: src/lib/motion.ts):
+//
+// The flip — the same card, turned over. The card's shell (paper, rule, shadow
+// and the position footer) is one element that stays mounted for the life of
+// the card; only which face is painted changes. A flip turns the shell edge-on
+// about its vertical axis (rotateY 0 → 90°) under CSS perspective, so the
+// stiff card narrows to a line, swaps the painted face at the instant the
+// shell is invisible, and turns it back (-90° → 0). A shadow passes over the
+// card as it turns away from the light. Both faces stay in the DOM throughout,
+// so a flip is never a remount, a layout change or a size change, and there is
+// never a frame with mirrored text, both faces, or neither.
 //
 // It replaced a classic two-face 3D flip (preserve-3d, both faces rotated,
 // backface-visibility: hidden). In WebKit — the engine behind every iPhone
@@ -43,14 +53,17 @@
 // shell's transform is always a 3D transform (never "none"), so its layer
 // exists before a flip starts instead of being created on its first frame.
 //
-// Navigation is a carousel. While a finger drags the card, the card it is
-// heading for rides alongside it, one gap away, so the drag reveals the next
-// card rather than the page. On release the outgoing and incoming cards run
-// the same tween from positions exactly one slot apart, so they stay adjacent
-// the whole way: the incoming card is on screen, opaque and complete, before
-// the outgoing one has gone, and no frame shows an empty stage. Buttons and
-// keys run the same slide from rest. With reduced motion the face swaps in
-// place and cards cross-fade.
+// Next and Previous — a different card. The card on top is moved a short way
+// aside, turning a few degrees and fading as it goes, while the card beneath
+// comes forward from the stack and settles. Next moves the card aside to the
+// right, Previous to the left, so the direction of travel through the deck
+// can be read from the motion alone. It is a hand moving a card off a stack,
+// not a slide show: nothing crosses the screen. A swiped card continues the
+// way the finger threw it (left for next, right for previous) from where it
+// was let go.
+//
+// With reduced motion there is no turn and no travel: the face swaps in place
+// and cards cross-fade.
 
 import {
   useCallback,
@@ -59,6 +72,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent as ReactDragEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -70,11 +84,20 @@ import {
   useMotionValue,
   useTransform,
   type MotionValue,
-  type Variants,
 } from "framer-motion";
 import { Check } from "lucide-react";
+import { Ornament, Sparkle } from "@/components/ui/decor";
 import { cn } from "@/lib/utils";
 import { renderCardHtml, type CardLinkMode } from "@/lib/flashcards/card-links";
+import {
+  briefFontSize,
+  displayFit,
+  displayFontSize,
+  splitAnswer,
+} from "@/lib/flashcards/card-layout";
+import { NAV_TILT, TURN_IN, TURN_OUT, cardVariants, type CardMotion } from "@/lib/motion";
+
+export type { CardMotion };
 import {
   TAP_SLOP,
   VelocityTracker,
@@ -85,43 +108,7 @@ import {
 } from "@/lib/gestures";
 import type { Flashcard } from "@/lib/flashcards/types";
 
-/** Passed through AnimatePresence so an exiting card knows which way to leave. */
-export interface CardMotion {
-  /** 1 = moving to the next card, -1 = previous, 0 = no spatial meaning (filter, restart). */
-  direction: -1 | 0 | 1;
-  width: number;
-  reduced: boolean;
-  /** Where the outgoing card was let go (0 for buttons and keys). */
-  offset: number;
-  /** Space between neighbouring cards in the carousel. */
-  gap: number;
-}
-
 type Side = "front" | "back";
-
-/** One slide, shared by the outgoing and incoming card so they stay adjacent. */
-const SLIDE = { duration: 0.3, ease: [0.2, 0.75, 0.3, 1] } as const;
-
-const cardVariants: Variants = {
-  // One slot beyond where the outgoing card was let go: exactly where its
-  // neighbour was riding during the drag.
-  enter: ({ direction, width, reduced, offset, gap }: CardMotion) =>
-    reduced || direction === 0 ? { x: 0, opacity: 0 } : { x: offset + direction * (width + gap), opacity: 1 },
-  center: ({ direction, reduced }: CardMotion) => ({
-    x: 0,
-    opacity: 1,
-    transition: reduced || direction === 0 ? { duration: 0.16 } : { x: SLIDE, opacity: { duration: 0 } },
-  }),
-  exit: ({ direction, width, reduced, gap }: CardMotion) =>
-    reduced || direction === 0
-      ? { opacity: 0, transition: { duration: 0.12 } }
-      : { x: -direction * (width + gap), transition: { x: SLIDE } },
-};
-
-/** First half of a flip: accelerate toward edge-on. */
-const TURN_IN = { duration: 0.12, ease: [0.5, 0, 0.9, 0.55] } as const;
-/** Second half: decelerate back to flat. */
-const TURN_OUT = { duration: 0.2, ease: [0.12, 0.6, 0.3, 1] } as const;
 
 /** Controls inside a card that keep their own taps and drags. */
 const OWN_CONTROLS =
@@ -142,11 +129,6 @@ function ownsDrag(target: EventTarget | null): boolean {
 /** A tap here is not a flip: a control, or a live card link. */
 function ownsTap(target: EventTarget | null): boolean {
   return target instanceof Element && !!target.closest(`${OWN_CONTROLS}, a[href]`);
-}
-
-export interface Neighbour {
-  card: Flashcard;
-  known: boolean;
 }
 
 interface GestureState {
@@ -174,10 +156,9 @@ export interface SwipeCardProps {
   compact: boolean;
   /** Space kept clear at the right of each face's header for controls floating over the card. */
   controlsInset: number;
+  /** Show "13 ─── 884" inside the card. Off where the screen shows it elsewhere; still read out. */
+  showPosition: boolean;
   onFlip: () => void;
-  /** The cards either side, shown riding alongside during a drag. */
-  previousCard: Neighbour | null;
-  nextCard: Neighbour | null;
   onNavigate: (direction: 1 | -1, fromX: number) => void;
   onEdge: (direction: 1 | -1) => void;
   onToggleKnown: () => void;
@@ -199,20 +180,19 @@ export function SwipeCard({
   linkMode,
   compact,
   controlsInset,
-  previousCard,
-  nextCard,
+  showPosition,
   onFlip,
   onNavigate,
   onEdge,
   onToggleKnown,
   onInteract,
 }: SwipeCardProps) {
-  const { reduced, width, gap } = motionCustom;
+  const { reduced, width } = motionCustom;
   const isPresent = useIsPresent();
 
   const x = useMotionValue(0);
-  // Neighbours are mounted only while a drag needs them.
-  const [peeking, setPeeking] = useState(false);
+  // A dragged card leans the way it is pulled, like a card held by one edge.
+  const rotate = useMotionValue(0);
 
   const gesture = useRef<GestureState | null>(null);
   const [tracker] = useState(() => new VelocityTracker());
@@ -222,6 +202,8 @@ export function SwipeCard({
   // ------------------------------------------------------------- the flip --
   const turn = useMotionValue(0);
   const shellTransform = useTransform(turn, (deg) => `perspective(1100px) rotateY(${deg}deg)`);
+  // Shade on the card's face, deepest when it is edge-on to the light.
+  const sheen = useTransform(turn, (deg) => Math.min(1, Math.abs(deg) / 90) * 0.75);
   const shellRef = useRef<HTMLDivElement>(null);
   const [painted, setPainted] = useState<Side>(flipped ? "back" : "front");
   const paintedRef = useRef<Side>(painted);
@@ -270,13 +252,13 @@ export function SwipeCard({
 
   // ------------------------------------------------------------- gestures --
   function springBack(value: MotionValue<number>, velocity = 0) {
-    const controls = reduced
-      ? animate(value, 0, { duration: 0.12 })
-      : animate(value, 0, { type: "spring", stiffness: 520, damping: 36, velocity: velocity * 1000 });
-    // Unmount the neighbours once the card is home, unless a new drag began.
-    controls.then(() => {
-      if (!gesture.current) setPeeking(false);
-    });
+    if (reduced) {
+      animate(value, 0, { duration: 0.12 });
+      animate(rotate, 0, { duration: 0.12 });
+      return;
+    }
+    animate(value, 0, { type: "spring", stiffness: 520, damping: 36, velocity: velocity * 1000 });
+    animate(rotate, 0, { type: "spring", stiffness: 520, damping: 36 });
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -294,6 +276,7 @@ export function SwipeCard({
     };
     tracker.reset(event.clientX, event.clientY, performance.now());
     x.stop();
+    rotate.stop();
   }
 
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -310,7 +293,6 @@ export function SwipeCard({
       // Vertical movement belongs to scrolling, never to the card.
       g.axis = axis === "y" ? "none" : axis;
       if (g.axis === "x") {
-        if (!reduced && (previousCard || nextCard)) setPeeking(true);
         try {
           event.currentTarget.setPointerCapture?.(event.pointerId);
         } catch {
@@ -321,7 +303,9 @@ export function SwipeCard({
 
     if (g.axis === "x") {
       const allowed = dx < 0 ? canGoNext : canGoPrevious;
-      x.set(allowed ? dx : rubberBand(dx));
+      const travel = allowed ? dx : rubberBand(dx);
+      x.set(travel);
+      if (!reduced && width > 0) rotate.set((travel / width) * NAV_TILT * 1.6);
     }
   }
 
@@ -348,8 +332,8 @@ export function SwipeCard({
     });
 
     if (outcome === "next" || outcome === "previous") {
-      // The card leaves from where the finger let go; the incoming card
-      // starts where its preview was riding.
+      // The card leaves from where the finger let go; the next one comes
+      // forward from the stack beneath it.
       onInteract();
       onNavigate(outcome === "next" ? 1 : -1, x.get());
       return;
@@ -412,9 +396,11 @@ export function SwipeCard({
       className="card-surface absolute inset-0 cursor-pointer select-none"
       style={{
         x,
+        rotate,
         touchAction: "pan-y",
         pointerEvents: isPresent ? "auto" : "none",
-        zIndex: isPresent ? 2 : 1,
+        // A card being moved aside stays on top of the one coming forward.
+        zIndex: isPresent ? 2 : 3,
       }}
       aria-hidden={isPresent ? undefined : true}
       onPointerDown={handlePointerDown}
@@ -431,79 +417,26 @@ export function SwipeCard({
         data-flipped={flipped}
         data-painted={painted}
         data-motion={reduced ? "reduced" : "full"}
-        className={cn(
-          "card-shell relative flex h-full w-full flex-col overflow-hidden border border-card-border shadow-card",
-          compact ? "rounded-[1.25rem]" : "rounded-[1.75rem]"
-        )}
-        style={{ transform: shellTransform }}
+        className="card-shell paper flex h-full w-full flex-col overflow-hidden"
+        style={{
+          transform: shellTransform,
+          ...(compact ? ({ "--radius-card": "1rem", "--paper-inset": "0.4rem" } as CSSProperties) : null),
+        }}
       >
-        <span aria-hidden className="card-back-stripe absolute inset-x-0 top-0 h-[3px] bg-accent/70" />
         <div className="relative min-h-0 flex-1">
           <CardFace side="front" hidden={flipped} {...faceProps} />
           <CardFace side="back" hidden={!flipped} {...faceProps} />
         </div>
-        <CardPosition position={position} total={total} present={isPresent} compact={compact} />
+        <CardPosition
+          position={position}
+          total={total}
+          present={isPresent}
+          compact={compact}
+          visible={showPosition}
+        />
+        <motion.span aria-hidden className="card-sheen" style={{ opacity: sheen }} />
       </motion.div>
-
-      {peeking && nextCard && (
-        <PeekCard side={1} gap={gap} neighbour={nextCard} position={position + 1} total={total} {...faceProps} />
-      )}
-      {peeking && previousCard && (
-        <PeekCard side={-1} gap={gap} neighbour={previousCard} position={position - 1} total={total} {...faceProps} />
-      )}
     </motion.div>
-  );
-}
-
-/**
- * A neighbouring card riding alongside the dragged one, drawn exactly as that
- * card will first appear (front face, its own position) so the hand-over to
- * the real card at release is invisible. Not interactive, not announced.
- */
-function PeekCard({
-  side,
-  gap,
-  neighbour,
-  position,
-  total,
-  compact,
-  ...faceProps
-}: {
-  side: 1 | -1;
-  gap: number;
-  neighbour: Neighbour;
-  position: number;
-  total: number;
-  compact: boolean;
-  fontFamily: string;
-  fontSize: number;
-  linkMode: CardLinkMode;
-  controlsInset: number;
-  onToggleKnown: () => void;
-}) {
-  return (
-    <div
-      aria-hidden
-      inert
-      data-peek={side === 1 ? "next" : "previous"}
-      className="pointer-events-none absolute inset-y-0 w-full"
-      style={side === 1 ? { left: `calc(100% + ${gap}px)` } : { right: `calc(100% + ${gap}px)` }}
-    >
-      <div
-        data-painted="front"
-        className={cn(
-          "card-shell relative flex h-full w-full flex-col overflow-hidden border border-card-border shadow-card",
-          compact ? "rounded-[1.25rem]" : "rounded-[1.75rem]"
-        )}
-        style={{ transform: "perspective(1100px) rotateY(0deg)" }}
-      >
-        <span aria-hidden className="card-back-stripe absolute inset-x-0 top-0 h-[3px] bg-accent/70" />
-        <div className="relative min-h-0 flex-1">
-          <CardFace side="front" hidden={false} card={neighbour.card} known={neighbour.known} compact={compact} {...faceProps} />
-        </div>
-        <CardPosition position={position} total={total} present={false} compact={compact} />
-      </div>
-    </div>
   );
 }
 
@@ -516,11 +449,13 @@ function CardPosition({
   total,
   present,
   compact,
+  visible,
 }: {
   position: number;
   total: number;
   present: boolean;
   compact: boolean;
+  visible: boolean;
 }) {
   const progress = total > 0 ? Math.min(1, position / total) : 0;
   return (
@@ -528,7 +463,10 @@ function CardPosition({
       data-testid={present ? "card-position" : undefined}
       className={cn(
         "flex shrink-0 items-center gap-3 text-[12px] font-semibold tabular-nums leading-none text-muted",
-        compact ? "px-4 pb-2.5 pt-1" : "px-6 pb-4 pt-1.5"
+        compact ? "px-5 pb-3.5 pt-1" : "px-8 pb-5 pt-1.5",
+        // Where the deck header already shows the position, the card stays a
+        // clean card; the count is still here for assistive technology.
+        !visible && "sr-only"
       )}
     >
       <span className="sr-only">
@@ -581,8 +519,21 @@ function CardFace({
   // Sanitized again here, not just at import — a deck stored by an earlier
   // version of the app was cleaned by that version's rules, and this is the
   // last point before the HTML reaches the DOM — then the card-link policy.
-  // Cached, and prewarmed for neighbouring cards by the viewer.
-  const safeHtml = useMemo(() => renderCardHtml(html, linkMode), [html, linkMode]);
+  // Cached, and prewarmed for neighbouring cards by the viewer. The back is
+  // then given its title / rule / answer structure where its HTML has one.
+  const safeHtml = useMemo(() => {
+    const rendered = renderCardHtml(html, linkMode);
+    return isBack ? splitAnswer(rendered) : rendered;
+  }, [html, linkMode, isBack]);
+
+  // A short term or question is set as display type: the front as large as
+  // the card allows, the back more quietly. Longer faces keep the reader's
+  // chosen size.
+  const fit = useMemo(() => displayFit(html), [html]);
+  const display = !isBack && fit !== null;
+  const contentFontSize = fit
+    ? displayFontSize(fit, fontSize, isBack ? 2.1 : 6.5)
+    : briefFontSize(html, fontSize);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [fade, setFade] = useState<Fade>("none");
@@ -635,7 +586,7 @@ function CardFace({
       <div
         className={cn(
           "flex min-h-11 items-center gap-2",
-          compact ? "pl-4 pr-3 pt-2" : "px-6 pt-4"
+          compact ? "pl-5 pr-4 pt-3" : "px-8 pt-5"
         )}
         style={controlsInset > 0 ? { paddingRight: controlsInset } : undefined}
       >
@@ -664,16 +615,25 @@ function CardFace({
         aria-label={scrollable ? `${isBack ? "Answer" : "Question"}, scrollable` : undefined}
         className={cn(
           "card-scroll min-h-0 flex-1 focus-visible:outline-offset-[-4px]",
-          compact ? "px-5 py-2" : "px-10 py-4"
+          compact ? "px-6 py-2" : "px-12 py-3"
         )}
         style={{ touchAction: "pan-y" }}
       >
         <div
-          className="anki-card-content"
-          style={{ fontFamily, fontSize: `${fontSize}px` }}
+          className={cn("anki-card-content", display && "card-display")}
+          style={{ fontFamily, fontSize: contentFontSize }}
           dangerouslySetInnerHTML={{ __html: safeHtml }}
         />
+        {display && <Ornament className="card-display-rule" />}
       </div>
+      {display && (
+        // The small gold stars printed in the corners of a term card.
+        <>
+          <Sparkle className="absolute left-[7%] top-[24%] h-3.5 w-3.5 text-[#c79a45]" />
+          <Sparkle className="absolute right-[8%] top-[22%] h-5 w-5 text-[#c79a45]" />
+          <Sparkle className="absolute bottom-[12%] left-[9%] h-4 w-4 text-[#c79a45]" />
+        </>
+      )}
     </div>
   );
 }
@@ -686,11 +646,11 @@ function KnownToggle({ known, onToggle }: { known: boolean; onToggle: () => void
       aria-pressed={known}
       className={cn(
         // The ::before extends the hit area to ~48px without enlarging the chip.
-        "relative inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold",
+        "relative z-[1] inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold",
         "before:absolute before:-inset-2 before:content-[''] transition-[background-color,border-color,color,transform] duration-150 active:scale-95",
         known
           ? "border-transparent bg-accent-soft text-accent"
-          : "border-border text-muted hover:border-border-strong hover:text-foreground"
+          : "border-border-strong/45 text-muted hover:border-border-strong hover:text-foreground"
       )}
     >
       <Check className="h-3.5 w-3.5" strokeWidth={known ? 3 : 2.25} />

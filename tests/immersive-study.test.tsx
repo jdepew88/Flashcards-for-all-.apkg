@@ -189,11 +189,39 @@ describe("the card's position, inside the card", () => {
     expect(counter()).toBe("1 / 1");
   });
 
-  it("has no card-count row or progress bar outside the card", () => {
+  it("on a phone, has no card-count row or progress bar outside the card", () => {
+    setMedia({ compact: true });
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
     expect(screen.queryByTestId("card-counter")).toBeNull();
+    expect(screen.queryByTestId("deck-progress")).toBeNull();
     expect(screen.queryByRole("progressbar")).toBeNull();
+    // So the card shows it.
+    expect(screen.getByTestId("card-position")).not.toHaveClass("sr-only");
+  });
+
+  it("on the desk layout, shows the position in the deck header and keeps the card clean", () => {
+    render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    const progress = screen.getByTestId("deck-progress");
+
+    expect(progress).toHaveTextContent("Card 1 of 5");
+    expect(screen.getByRole("banner")).toContainElement(progress);
+    // Still inside the card for assistive technology, but not drawn there too.
+    expect(screen.getByTestId("card-position")).toHaveClass("sr-only");
+    expect(within(progress).getByText("Card 1 of 5")).toHaveAttribute("aria-hidden", "true");
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(screen.getByTestId("deck-progress")).toHaveTextContent("Card 2 of 5");
+  });
+
+  it("in full screen, with the header gone, the card shows its position again", async () => {
+    const user = userEvent.setup();
+    render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Full screen" }));
+
+    expect(screen.queryByTestId("deck-progress")).toBeNull();
+    expect(screen.getByTestId("card-position")).not.toHaveClass("sr-only");
   });
 });
 

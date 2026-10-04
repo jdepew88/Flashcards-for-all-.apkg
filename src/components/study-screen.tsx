@@ -68,7 +68,7 @@ export function StudyScreen({ slug, onExit }: { slug: string; onExit: () => void
           <div className="skeleton h-8 w-8 rounded-full" />
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center pb-16 pt-4">
-          <div className="skeleton h-full max-h-[38rem] w-full max-w-[40rem] rounded-[1.75rem]" />
+          <div className="skeleton aspect-[3/2] max-h-full w-full max-w-[40rem] rounded-[1.15rem]" />
         </div>
         <p className="sr-only" role="status">
           Loading deck…
@@ -80,10 +80,10 @@ export function StudyScreen({ slug, onExit }: { slug: string; onExit: () => void
   if (status === "not-found" || !deck) {
     return (
       <div className="page-gutter mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center py-16 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-muted text-muted">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-soft text-accent">
           <Layers className="h-6 w-6" />
         </span>
-        <h1 className="mt-5 text-xl font-semibold tracking-tight">We couldn&apos;t find that deck.</h1>
+        <h1 className="mt-5 font-display text-2xl font-bold">We couldn&apos;t find that deck.</h1>
         <p className="mt-2 text-[15px] leading-relaxed text-muted">
           Decks are saved in this browser on this device, so a link opened somewhere else
           won&apos;t find it. Import the file again to study it here.

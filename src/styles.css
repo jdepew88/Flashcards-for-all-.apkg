@@ -1,169 +1,284 @@
 @import "tailwindcss";
 
 /* ==========================================================================
-   Flashcards — design tokens and global styles
+   Flashcards for All — design tokens and global styles
    ==========================================================================
 
-   Colour lives only in the tokens below. Components use the Tailwind names
-   mapped in `@theme inline` (bg-card, text-muted, border-border, bg-accent …),
-   so a theme is nothing more than a different set of token values.
+   The look is a quiet study desk: a deep sky behind translucent panels, mint
+   for action, gold for small accents, and flashcards that read as cream
+   cardstock with dark brown ink.
 
-   Two palettes from one system, same paradigm as Quiz on Demand:
-     Paper & Moss (light) — warm near-white paper, bright card, moss green for
-                            action and selection. Restrained borders and shadow.
-     Slate & Moss (dark)  — deep green-grey slate rather than blue-black, the card
-                            lifted slightly off the page, a softer moss accent.
+   Colour lives only in the tokens below. Components use the Tailwind names
+   mapped in `@theme inline` (bg-surface-elevated, text-muted, bg-accent …) or
+   the component classes further down (.panel, .paper, .btn-primary …), so a
+   theme is nothing more than a different set of token values.
+
+   Two palettes from one system:
+     Night desk (dark)  — deep navy and teal, a warm lamp at the right, stars.
+                          This is the reference design.
+     Morning desk (light) — the same desk in daylight: pale sky, navy ink,
+                          deep teal for text-sized accents.
+   The flashcard itself is the same cream card in both.
 
    The dark palette is declared twice with identical values: once for an
    explicit choice ([data-theme="dark"]) and once for the operating-system
    preference when no choice is stored. tests/theme.test.tsx fails if the two
    ever drift apart, and checks contrast for the pairs text is set on.
 
-   CSP (public/_headers): no web fonts, no external stylesheets. Type is the
-   system stack; icons are bundled SVG.
+   CSP (public/_headers): no web fonts, no external stylesheets. Type is two
+   system stacks — a serif for display, the system sans for interface — and
+   every decoration is CSS or bundled SVG.
    ========================================================================== */
 
 :root {
   color-scheme: light;
 
-  --background: #f3f2ec;
-  --surface: #f8f7f2;
-  --surface-elevated: #ffffff;
-  --surface-muted: #e8e6de;
-  --card: #fffefb;
-  --card-back: #fbfcf7;
-  --card-border: #e0ddd3;
-  --foreground: #1a1d1a;
-  --foreground-muted: #5b615a;
-  --border: #dcd9cf;
-  --border-strong: #c3bfb2;
-  --accent: #3d6b3f;
-  --accent-hover: #335b35;
-  --accent-soft: #e2eadb;
+  --background: #e7eef0;
+  --surface: #eef3f4;
+  --surface-elevated: #fbfcfb;
+  --surface-muted: #d7e2e4;
+  --foreground: #13273a;
+  --foreground-muted: #496072;
+  --border: #c8d5d9;
+  --border-strong: #a7bbc2;
+  --accent: #0d6a5a;
+  --accent-hover: #0a5547;
+  --accent-soft: #d2ebe1;
   --accent-foreground: #ffffff;
-  --success: #2f6b43;
-  --warning: #85570a;
-  --warning-soft: #f6ecd6;
+  --primary-from: #8df0cf;
+  --primary-to: #5cd3ad;
+  --primary-ink: #06241d;
+  --gold: #a8741a;
+  --success: #1b6a45;
+  --warning: #7a5208;
+  --warning-soft: #f6ead0;
   --danger: #b42318;
   --danger-hover: #971c13;
   --danger-soft: #fbe8e5;
   --danger-foreground: #ffffff;
-  --focus: #3d6b3f;
-  --backdrop: rgb(22 24 20 / 40%);
-  --hero-glow: rgb(61 107 63 / 12%);
-  --shadow: 0 1px 2px rgb(38 36 28 / 6%), 0 10px 30px -14px rgb(38 36 28 / 22%);
-  --shadow-soft: 0 1px 2px rgb(38 36 28 / 7%);
-  --card-shadow: 0 1px 1px rgb(38 36 28 / 4%), 0 4px 10px -4px rgb(38 36 28 / 8%),
-    0 30px 60px -30px rgb(38 36 28 / 30%);
-  --float-shadow: 0 24px 64px -16px rgb(30 28 20 / 30%);
+  --focus: #0d6a5a;
+  --backdrop: rgb(16 30 44 / 42%);
 
-  --tint-1-bg: #e2eadb;
-  --tint-1-fg: #335b35;
+  --card: #f6ecd6;
+  --card-back: #e7efe4;
+  --card-border: #d9c9a4;
+  --card-foreground: #2a2018;
+  --card-muted: #6a5943;
+  --card-accent: #1c6557;
+  --card-accent-soft: #d5e8dc;
+  --card-well: #eadfc4;
+  --card-inset: rgb(150 115 60 / 34%);
+  --stack-1: #eadcbb;
+  --stack-2: #a6dfcb;
+  --stack-3: #b4c0e6;
+
+  --panel: rgb(255 255 255 / 58%);
+  --panel-border: rgb(24 62 84 / 14%);
+  --panel-highlight: rgb(255 255 255 / 70%);
+  --control: rgb(255 255 255 / 72%);
+  --control-border: rgb(24 62 84 / 22%);
+  --hand: #3f6470;
+  --sparkle-opacity: 0.55;
+  --scene-sky: radial-gradient(64rem 34rem at 50% 8%, rgb(255 255 255 / 75%), transparent 70%),
+    radial-gradient(44rem 32rem at 100% 34%, rgb(255 206 140 / 42%), transparent 66%),
+    linear-gradient(180deg, #d5e6eb 0%, #e7eef0 48%, #efe8da 100%);
+  --scene-desk: radial-gradient(52rem 15rem at 84% 100%, rgb(255 196 120 / 30%), transparent 70%),
+    linear-gradient(180deg, transparent, rgb(150 118 84 / 26%));
+  --scene-vignette: radial-gradient(120% 90% at 50% 40%, transparent 62%, rgb(60 90 100 / 14%));
+  --scene-decor-opacity: 0.5;
+  --lamp-glow: rgb(255 190 110 / 38%);
+
+  --shadow: 0 1px 2px rgb(20 44 60 / 6%), 0 14px 34px -16px rgb(20 44 60 / 26%);
+  --shadow-soft: 0 1px 2px rgb(20 44 60 / 8%);
+  --card-shadow: 0 6px 10px -4px rgb(30 40 50 / 22%), 0 30px 50px -22px rgb(30 40 50 / 42%);
+  --float-shadow: 0 24px 64px -16px rgb(20 40 56 / 36%);
+  --primary-glow: 0 10px 26px -12px rgb(40 170 130 / 70%);
+
+  --tint-1-bg: #d2ebe1;
+  --tint-1-fg: #0a5547;
   --tint-2-bg: #f2e3d8;
   --tint-2-fg: #8a4a26;
-  --tint-3-bg: #e1e6ec;
-  --tint-3-fg: #3b5068;
+  --tint-3-bg: #dbe4f0;
+  --tint-3-fg: #33507a;
   --tint-4-bg: #f1e8cf;
   --tint-4-fg: #735610;
-  --tint-5-bg: #ece1ea;
-  --tint-5-fg: #6b3f62;
+  --tint-5-bg: #e8e0f0;
+  --tint-5-fg: #5b3f7a;
 
   --gutter: clamp(0.75rem, 3.5vw, 1.5rem);
   --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-/* Slate & Moss (dark) — explicit choice. Keep identical to the block below. */
+/* Night desk (dark) — explicit choice. Keep identical to the block below. */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --background: #101412;
-  --surface: #151a17;
-  --surface-elevated: #1c221e;
-  --surface-muted: #242b26;
-  --card: #1a201c;
-  --card-back: #1b231d;
-  --card-border: #2b332d;
-  --foreground: #e7ece6;
-  --foreground-muted: #a1aaa2;
-  --border: #29302b;
-  --border-strong: #3b443d;
-  --accent: #8fbd82;
-  --accent-hover: #a4cb98;
-  --accent-soft: #1f2d21;
-  --accent-foreground: #0f170e;
-  --success: #8fcf99;
-  --warning: #e0b35c;
-  --warning-soft: #332a1a;
-  --danger: #f2877a;
-  --danger-hover: #f6a197;
-  --danger-soft: #34201d;
-  --danger-foreground: #1a0c0a;
-  --focus: #a6d59a;
-  --backdrop: rgb(4 6 5 / 64%);
-  --hero-glow: rgb(143 189 130 / 8%);
-  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 30px -14px rgb(0 0 0 / 60%);
-  --shadow-soft: 0 1px 2px rgb(0 0 0 / 35%);
-  --card-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 30px 60px -28px rgb(0 0 0 / 70%);
-  --float-shadow: 0 24px 64px -16px rgb(0 0 0 / 70%);
+  --background: #0a1728;
+  --surface: #0d1d31;
+  --surface-elevated: #12253b;
+  --surface-muted: #1a3049;
+  --foreground: #f1f5f4;
+  --foreground-muted: #a8bccb;
+  --border: #213a55;
+  --border-strong: #3a5d80;
+  --accent: #7fe6c1;
+  --accent-hover: #a0f0d4;
+  --accent-soft: #123b3b;
+  --accent-foreground: #06241d;
+  --primary-from: #8df0cf;
+  --primary-to: #5cd3ad;
+  --primary-ink: #06241d;
+  --gold: #f1c56d;
+  --success: #8fe3b0;
+  --warning: #f1c56d;
+  --warning-soft: #3a2e15;
+  --danger: #ff9c8c;
+  --danger-hover: #ffb5a8;
+  --danger-soft: #3d1f24;
+  --danger-foreground: #2b0b08;
+  --focus: #a0f0d4;
+  --backdrop: rgb(3 8 16 / 68%);
 
-  --tint-1-bg: #223024;
-  --tint-1-fg: #a9cf9c;
-  --tint-2-bg: #35271f;
-  --tint-2-fg: #e3a987;
-  --tint-3-bg: #212a33;
-  --tint-3-fg: #a9bdd3;
-  --tint-4-bg: #332c1c;
-  --tint-4-fg: #dcc07a;
-  --tint-5-bg: #2f2330;
-  --tint-5-fg: #d6a9cd;
+  --card: #f6ecd6;
+  --card-back: #e7efe4;
+  --card-border: #d9c9a4;
+  --card-foreground: #2a2018;
+  --card-muted: #6a5943;
+  --card-accent: #1c6557;
+  --card-accent-soft: #d5e8dc;
+  --card-well: #eadfc4;
+  --card-inset: rgb(150 115 60 / 34%);
+  --stack-1: #e2d4b2;
+  --stack-2: #8fd6bf;
+  --stack-3: #9aa8dc;
+
+  --panel: rgb(17 37 60 / 60%);
+  --panel-border: rgb(150 196 226 / 20%);
+  --panel-highlight: rgb(190 225 245 / 9%);
+  --control: rgb(22 42 68 / 78%);
+  --control-border: rgb(150 190 222 / 28%);
+  --hand: #cfe6e4;
+  --sparkle-opacity: 1;
+  --scene-sky: radial-gradient(62rem 36rem at 48% 16%, rgb(24 124 122 / 40%), transparent 70%),
+    radial-gradient(44rem 34rem at 100% 36%, rgb(255 170 80 / 20%), transparent 66%),
+    radial-gradient(40rem 30rem at 0% 20%, rgb(16 60 78 / 45%), transparent 70%),
+    linear-gradient(180deg, #091a33 0%, #0b2338 46%, #0a1728 100%);
+  --scene-desk: radial-gradient(52rem 15rem at 84% 100%, rgb(255 160 80 / 20%), transparent 70%),
+    linear-gradient(180deg, transparent, rgb(34 22 18 / 62%));
+  --scene-vignette: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgb(2 6 14 / 62%));
+  --scene-decor-opacity: 1;
+  --lamp-glow: rgb(255 176 84 / 34%);
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 18px 40px -18px rgb(0 0 0 / 70%);
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 35%);
+  --card-shadow: 0 8px 12px -4px rgb(0 0 0 / 38%), 0 34px 60px -22px rgb(0 0 0 / 78%);
+  --float-shadow: 0 24px 64px -16px rgb(0 0 0 / 75%);
+  --primary-glow: 0 10px 30px -10px rgb(110 235 195 / 55%);
+
+  --tint-1-bg: #153a36;
+  --tint-1-fg: #8fe6c6;
+  --tint-2-bg: #3b2c1c;
+  --tint-2-fg: #f0c48a;
+  --tint-3-bg: #1d3252;
+  --tint-3-fg: #a9c8f0;
+  --tint-4-bg: #3a3216;
+  --tint-4-fg: #ecd47e;
+  --tint-5-bg: #33264a;
+  --tint-5-fg: #cdb4f2;
 }
 
-/* Slate & Moss (dark) — operating-system preference, when no choice is stored. */
+/* Night desk (dark) — operating-system preference, when no choice is stored. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
 
-    --background: #101412;
-    --surface: #151a17;
-    --surface-elevated: #1c221e;
-    --surface-muted: #242b26;
-    --card: #1a201c;
-    --card-back: #1b231d;
-    --card-border: #2b332d;
-    --foreground: #e7ece6;
-    --foreground-muted: #a1aaa2;
-    --border: #29302b;
-    --border-strong: #3b443d;
-    --accent: #8fbd82;
-    --accent-hover: #a4cb98;
-    --accent-soft: #1f2d21;
-    --accent-foreground: #0f170e;
-    --success: #8fcf99;
-    --warning: #e0b35c;
-    --warning-soft: #332a1a;
-    --danger: #f2877a;
-    --danger-hover: #f6a197;
-    --danger-soft: #34201d;
-    --danger-foreground: #1a0c0a;
-    --focus: #a6d59a;
-    --backdrop: rgb(4 6 5 / 64%);
-    --hero-glow: rgb(143 189 130 / 8%);
-    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 30px -14px rgb(0 0 0 / 60%);
-    --shadow-soft: 0 1px 2px rgb(0 0 0 / 35%);
-    --card-shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 30px 60px -28px rgb(0 0 0 / 70%);
-    --float-shadow: 0 24px 64px -16px rgb(0 0 0 / 70%);
+    --background: #0a1728;
+    --surface: #0d1d31;
+    --surface-elevated: #12253b;
+    --surface-muted: #1a3049;
+    --foreground: #f1f5f4;
+    --foreground-muted: #a8bccb;
+    --border: #213a55;
+    --border-strong: #3a5d80;
+    --accent: #7fe6c1;
+    --accent-hover: #a0f0d4;
+    --accent-soft: #123b3b;
+    --accent-foreground: #06241d;
+    --primary-from: #8df0cf;
+    --primary-to: #5cd3ad;
+    --primary-ink: #06241d;
+    --gold: #f1c56d;
+    --success: #8fe3b0;
+    --warning: #f1c56d;
+    --warning-soft: #3a2e15;
+    --danger: #ff9c8c;
+    --danger-hover: #ffb5a8;
+    --danger-soft: #3d1f24;
+    --danger-foreground: #2b0b08;
+    --focus: #a0f0d4;
+    --backdrop: rgb(3 8 16 / 68%);
 
-    --tint-1-bg: #223024;
-    --tint-1-fg: #a9cf9c;
-    --tint-2-bg: #35271f;
-    --tint-2-fg: #e3a987;
-    --tint-3-bg: #212a33;
-    --tint-3-fg: #a9bdd3;
-    --tint-4-bg: #332c1c;
-    --tint-4-fg: #dcc07a;
-    --tint-5-bg: #2f2330;
-    --tint-5-fg: #d6a9cd;
+    --card: #f6ecd6;
+    --card-back: #e7efe4;
+    --card-border: #d9c9a4;
+    --card-foreground: #2a2018;
+    --card-muted: #6a5943;
+    --card-accent: #1c6557;
+    --card-accent-soft: #d5e8dc;
+    --card-well: #eadfc4;
+    --card-inset: rgb(150 115 60 / 34%);
+    --stack-1: #e2d4b2;
+    --stack-2: #8fd6bf;
+    --stack-3: #9aa8dc;
+
+    --panel: rgb(17 37 60 / 60%);
+    --panel-border: rgb(150 196 226 / 20%);
+    --panel-highlight: rgb(190 225 245 / 9%);
+    --control: rgb(22 42 68 / 78%);
+    --control-border: rgb(150 190 222 / 28%);
+    --hand: #cfe6e4;
+    --sparkle-opacity: 1;
+    --scene-sky: radial-gradient(62rem 36rem at 48% 16%, rgb(24 124 122 / 40%), transparent 70%),
+      radial-gradient(44rem 34rem at 100% 36%, rgb(255 170 80 / 20%), transparent 66%),
+      radial-gradient(40rem 30rem at 0% 20%, rgb(16 60 78 / 45%), transparent 70%),
+      linear-gradient(180deg, #091a33 0%, #0b2338 46%, #0a1728 100%);
+    --scene-desk: radial-gradient(52rem 15rem at 84% 100%, rgb(255 160 80 / 20%), transparent 70%),
+      linear-gradient(180deg, transparent, rgb(34 22 18 / 62%));
+    --scene-vignette: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgb(2 6 14 / 62%));
+    --scene-decor-opacity: 1;
+    --lamp-glow: rgb(255 176 84 / 34%);
+
+    --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 18px 40px -18px rgb(0 0 0 / 70%);
+    --shadow-soft: 0 1px 2px rgb(0 0 0 / 35%);
+    --card-shadow: 0 8px 12px -4px rgb(0 0 0 / 38%), 0 34px 60px -22px rgb(0 0 0 / 78%);
+    --float-shadow: 0 24px 64px -16px rgb(0 0 0 / 75%);
+    --primary-glow: 0 10px 30px -10px rgb(110 235 195 / 55%);
+
+    --tint-1-bg: #153a36;
+    --tint-1-fg: #8fe6c6;
+    --tint-2-bg: #3b2c1c;
+    --tint-2-fg: #f0c48a;
+    --tint-3-bg: #1d3252;
+    --tint-3-fg: #a9c8f0;
+    --tint-4-bg: #3a3216;
+    --tint-4-fg: #ecd47e;
+    --tint-5-bg: #33264a;
+    --tint-5-fg: #cdb4f2;
   }
+}
+
+/* Tokens that do not change with the theme: shape, rhythm and motion. The
+   card's flip and shuffle run through framer-motion and take their timings
+   from src/lib/motion.ts, which mirrors the durations here. */
+html {
+  --radius-panel: 1.5rem;
+  --radius-control: 0.9rem;
+  --radius-card: 1.15rem;
+  --space-panel: clamp(1.25rem, 3.4vw, 2.25rem);
+  --dur-fast: 150ms;
+  --dur-flip: 380ms;
+  --dur-nav: 300ms;
+  --ease-card: cubic-bezier(0.2, 0.75, 0.3, 1);
 }
 
 @theme inline {
@@ -182,6 +297,8 @@
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
   --color-accent-foreground: var(--accent-foreground);
+  --color-gold: var(--gold);
+  --color-hand: var(--hand);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
@@ -191,6 +308,10 @@
   --color-danger-foreground: var(--danger-foreground);
   --color-focus: var(--focus);
   --color-backdrop: var(--backdrop);
+  --color-panel: var(--panel);
+  --color-panel-border: var(--panel-border);
+  --color-control: var(--control);
+  --color-control-border: var(--control-border);
 
   --shadow-soft: var(--shadow-soft);
   --shadow-panel: var(--shadow);
@@ -198,6 +319,8 @@
   --shadow-float: var(--float-shadow);
 
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Iowan Old Style", Charter, "Bitstream Charter", Georgia, "Times New Roman", serif;
+  --font-hand: "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS", cursive;
 }
 
 /* ---------------------------------------------------------------- base -- */
@@ -219,7 +342,8 @@
 
   body {
     margin: 0;
-    background: var(--background);
+    /* No background of its own: <html> paints the base colour, and the scene
+       (a fixed layer behind the page) must show through. */
     color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
@@ -273,6 +397,65 @@ html.theme-transition *::after {
     box-shadow 280ms var(--ease-out) !important;
 }
 
+/* --------------------------------------------------------------- scene -- */
+
+/* The room behind every screen (src/components/ui/scenery.tsx): sky, lamp
+   light and desk are gradients; the lamp, books and leaves are small inline
+   SVGs that only appear where the viewport has room beside the content. */
+.scene {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--scene-sky);
+}
+
+.scene-desk {
+  position: absolute;
+  inset: auto 0 0;
+  height: 30vh;
+  background: var(--scene-desk);
+}
+
+.scene-vignette {
+  position: absolute;
+  inset: 0;
+  background: var(--scene-vignette);
+}
+
+.scene-decor {
+  position: absolute;
+  opacity: var(--scene-decor-opacity);
+}
+
+.scene-lamp-glow {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--lamp-glow), transparent);
+}
+
+.sparkle {
+  opacity: var(--sparkle-opacity);
+}
+
+@keyframes twinkle {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+
+.twinkle {
+  animation: twinkle var(--twinkle, 5s) ease-in-out infinite;
+  animation-delay: var(--twinkle-delay, 0s);
+}
+
 /* --------------------------------------------------------------- shell -- */
 
 /* The study screen is an app shell: exactly one viewport tall, no page
@@ -289,7 +472,7 @@ html.study-mode body {
   height: 100dvh;
   padding-left: max(var(--gutter), env(safe-area-inset-left));
   padding-right: max(var(--gutter), env(safe-area-inset-right));
-  /* Cards slide in from beyond the edge: clip them rather than widen the page. */
+  /* A card moved aside may cross the edge: clip it rather than widen the page. */
   overflow: hidden;
   overflow: clip;
 }
@@ -299,16 +482,16 @@ html.study-mode body {
    sensor housing at the side. Nothing here is a fixed device height: the
    card takes whatever 100dvh leaves once the insets are out. */
 .study-shell[data-layout="phone"] {
-  --gutter: 0.5rem;
-  padding-top: max(0.5rem, env(safe-area-inset-top));
-  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  --gutter: 0.625rem;
+  padding-top: max(0.625rem, env(safe-area-inset-top));
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
 
-/* Immersive: the thinnest frame that still reads as a card on a page. */
+/* Immersive: the thinnest frame that still reads as a card on a desk. */
 .study-shell[data-immersive="true"] {
-  --gutter: 0.375rem;
-  padding-top: max(0.375rem, env(safe-area-inset-top));
-  padding-bottom: max(0.375rem, env(safe-area-inset-bottom));
+  --gutter: 0.5rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  padding-bottom: max(0.625rem, env(safe-area-inset-bottom));
 }
 
 .study-shell[data-layout="wide"][data-immersive="true"] {
@@ -326,12 +509,74 @@ html.study-mode body {
 }
 
 .page-gutter {
-  padding-left: max(1.25rem, env(safe-area-inset-left));
-  padding-right: max(1.25rem, env(safe-area-inset-right));
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
 }
 
-.hero-glow {
-  background: radial-gradient(56rem 20rem at 50% -5rem, var(--hero-glow), transparent 72%);
+/* On a short window the study screen keeps the card and its controls and
+   drops what only decorates them. */
+@media (max-height: 760px) {
+  .study-tip {
+    display: none;
+  }
+}
+
+@media (max-height: 640px) {
+  .study-deck-meta {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------- components -- */
+
+/* In the components layer, so a utility on the same element (absolute,
+   text-danger, a different radius) still wins. */
+@layer components {
+  /* Translucent panel: the glass the reference lays its content on. */
+  .panel {
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius-panel);
+    background: var(--panel);
+    box-shadow:
+      inset 0 1px 0 var(--panel-highlight),
+      var(--shadow);
+    -webkit-backdrop-filter: blur(14px) saturate(1.15);
+    backdrop-filter: blur(14px) saturate(1.15);
+  }
+
+  .eyebrow {
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  .btn-primary {
+    border: 1px solid color-mix(in srgb, var(--primary-from) 70%, white);
+    background: linear-gradient(180deg, var(--primary-from), var(--primary-to));
+    color: var(--primary-ink);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 55%),
+      var(--primary-glow);
+  }
+
+  .btn-primary:hover {
+    filter: brightness(1.06);
+  }
+
+  .btn-glass {
+    border: 1px solid var(--control-border);
+    background: var(--control);
+    color: var(--foreground);
+    box-shadow: inset 0 1px 0 var(--panel-highlight);
+  }
+
+  .btn-glass:hover {
+    border-color: var(--border-strong);
+    background: color-mix(in srgb, var(--control) 80%, var(--foreground) 6%);
+  }
 }
 
 .kbd {
@@ -339,13 +584,90 @@ html.study-mode body {
   min-width: 1.35rem;
   align-items: center;
   justify-content: center;
-  padding: 0.1rem 0.35rem;
-  border: 1px solid var(--border);
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--control-border);
   border-bottom-width: 2px;
-  border-radius: 0.35rem;
-  background: var(--surface-elevated);
+  border-radius: 0.4rem;
+  background: var(--control);
   color: var(--foreground-muted);
   font: 500 0.6875rem/1.2 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+/* --------------------------------------------------------------- paper -- */
+
+@layer components {
+  /* Cardstock. One class dresses every card on the site — the card being
+     studied, the title cards on the home page and the explanatory ones — so
+     they are plainly the same object. Inside a card the semantic tokens are
+     re-pointed at ink-on-paper values, so anything placed on a card (labels,
+     the Known chip, deck HTML) reads correctly in both themes without knowing
+     it is on paper. */
+  .paper {
+    --paper: var(--card);
+    --foreground: var(--card-foreground);
+    --foreground-muted: var(--card-muted);
+    --accent: var(--card-accent);
+    --accent-hover: var(--card-accent);
+    --accent-soft: var(--card-accent-soft);
+    --border: var(--card-border);
+    --border-strong: var(--card-muted);
+    --surface-muted: var(--card-well);
+    --focus: var(--card-accent);
+
+    position: relative;
+    border-radius: var(--radius-card);
+    background-color: var(--paper);
+    /* Fine paper grain (an inline SVG noise tile) under a soft top-left light. */
+    background-image:
+      linear-gradient(135deg, rgb(255 255 255 / 34%), transparent 42%, rgb(120 90 40 / 9%)),
+      url("data:image/svg+xml,%3Csvg xmlns=%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22 width=%22180%22 height=%22180%22%3E%3Cfilter id=%22n%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%220.85%22 numOctaves=%222%22 stitchTiles=%22stitch%22/%3E%3CfeColorMatrix values=%220 0 0 0 0.36 0 0 0 0 0.26 0 0 0 0 0.12 0 0 0 0.11 0%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23n)%22/%3E%3C/svg%3E");
+    color: var(--card-foreground);
+    /* A lit top edge, then two steps of card thickness, then the cast shadow. */
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 60%),
+      inset 0 0 0 1px color-mix(in srgb, var(--paper) 86%, #6b4d1c),
+      0 2px 0 color-mix(in srgb, var(--paper) 82%, #5a4320),
+      0 4px 0 color-mix(in srgb, var(--paper) 68%, #5a4320),
+      var(--card-shadow);
+  }
+
+  /* The slightly darker inset rule printed just inside the card's edge. */
+  .paper::after {
+    content: "";
+    position: absolute;
+    inset: var(--paper-inset, 0.6rem);
+    border: 1px solid var(--card-inset);
+    border-radius: calc(var(--radius-card) - 0.35rem);
+    pointer-events: none;
+  }
+
+  .paper-back {
+    --paper: var(--card-back);
+  }
+
+  .paper-tan {
+    --paper: var(--stack-1);
+  }
+
+  .paper-mint {
+    --paper: var(--stack-2);
+  }
+
+  .paper-blue {
+    --paper: var(--stack-3);
+  }
+
+  /* Cards waiting underneath: silhouettes only, nothing to read. */
+  .paper-flat {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--paper) 84%, #33401f),
+      0 3px 0 color-mix(in srgb, var(--paper) 72%, #2a3340),
+      0 16px 30px -18px rgb(0 0 0 / 55%);
+  }
+
+  .paper-flat::after {
+    content: none;
+  }
 }
 
 /* ---------------------------------------------------------------- card -- */
@@ -354,18 +676,29 @@ html.study-mode body {
    edge-on and swaps which face is painted (src/components/swipe-card.tsx).
    The swap is decided here, from data-painted, so it lands in the same frame
    as the turn reaching edge-on. Nothing relies on backface-visibility. */
-.card-shell {
-  background: var(--card);
-}
-
 .card-shell[data-painted="back"] {
-  background: var(--card-back);
+  --paper: var(--card-back);
 }
 
-.card-shell[data-painted="front"] > .card-back-stripe,
 .card-shell[data-painted="front"] [data-face="back"],
 .card-shell[data-painted="back"] [data-face="front"] {
   visibility: hidden;
+}
+
+/* The shading that passes over the card as it turns away from the light. */
+.card-sheen {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background: linear-gradient(100deg, rgb(20 12 4 / 20%), rgb(20 12 4 / 62%));
+  pointer-events: none;
+}
+
+/* Each face is a size container, so a short question can be set as large as
+   the card allows (see displayFit in src/lib/flashcards/card-layout.ts). */
+.flashcard-face {
+  container-type: size;
 }
 
 /* A long press on a card is a slow swipe, not a request for the link or
@@ -388,11 +721,23 @@ html.study-mode body {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-color: var(--card-border) transparent;
 }
 
 .card-scroll > .anki-card-content {
   margin-block: auto;
+}
+
+/* A display term carries its ornament directly beneath it; the pair is
+   centred together. */
+.card-scroll > .anki-card-content.card-display {
+  margin-bottom: 0;
+}
+
+.card-scroll > .card-display-rule {
+  flex-shrink: 0;
+  margin: clamp(0.6rem, 4cqh, 1.4rem) auto auto;
+  font-size: clamp(1rem, 3.4cqw, 1.5rem);
 }
 
 .card-scroll[data-fade="bottom"] {
@@ -408,6 +753,25 @@ html.study-mode body {
 .card-scroll[data-fade="both"] {
   -webkit-mask-image: linear-gradient(transparent, #000 2rem, #000 calc(100% - 2.5rem), transparent);
   mask-image: linear-gradient(transparent, #000 2rem, #000 calc(100% - 2.5rem), transparent);
+}
+
+/* The gold rule with a four-point star at its centre, used under a card's
+   term and wherever a card's HTML carries its own <hr>. */
+.ornament {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6em;
+  color: #b98a2e;
+}
+
+.ornament::before,
+.ornament::after {
+  content: "";
+  width: 2.6em;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.75;
 }
 
 @keyframes hint-nudge {
@@ -437,10 +801,10 @@ html.study-mode body {
   background: linear-gradient(
       100deg,
       transparent 30%,
-      color-mix(in srgb, var(--foreground) 5%, transparent) 50%,
+      color-mix(in srgb, var(--foreground) 7%, transparent) 50%,
       transparent 70%
     )
-    var(--surface-muted);
+    var(--panel);
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
@@ -463,9 +827,44 @@ details > summary::-webkit-details-marker {
 
 .anki-card-content {
   text-align: center;
-  line-height: 1.55;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   color: var(--foreground);
+}
+
+/* A short question or term is the card: set large, bold and balanced. The
+   size itself is computed per card and arrives as an inline font-size. */
+.anki-card-content.card-display {
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+
+.anki-card-content.card-display b,
+.anki-card-content.card-display strong {
+  font-weight: 800;
+}
+
+/* The back of a card whose template repeats the question above the answer
+   (Anki's {{FrontSide}}<hr id=answer>…): the question becomes the card's
+   title, the rule becomes the ornament, the answer follows. */
+.anki-card-content .card-term {
+  font-size: 1.3em;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.anki-card-content .card-answer {
+  font-size: 1.08em;
+}
+
+.anki-card-content .card-term > :last-child,
+.anki-card-content .card-answer > :last-child {
+  margin-bottom: 0;
 }
 
 .anki-card-content > :first-child {
@@ -482,7 +881,7 @@ details > summary::-webkit-details-marker {
 
 .anki-card-content b,
 .anki-card-content strong {
-  font-weight: 650;
+  font-weight: 700;
 }
 
 .anki-card-content ul,
@@ -533,11 +932,34 @@ details > summary::-webkit-details-marker {
   object-fit: contain;
 }
 
+/* A rule in a card is drawn as the ornament: two gold hairlines either side
+   of a small four-point star. */
 .anki-card-content hr {
-  width: 100%;
-  margin: 1em 0;
+  position: relative;
+  width: min(100%, 11em);
+  height: 1px;
+  margin: 0.9em auto;
+  overflow: visible;
   border: none;
-  border-top: 1px solid var(--border);
+  background: linear-gradient(
+    90deg,
+    #b98a2e 0 calc(50% - 0.75em),
+    transparent calc(50% - 0.75em) calc(50% + 0.75em),
+    #b98a2e calc(50% + 0.75em) 100%
+  );
+  opacity: 0.85;
+}
+
+.anki-card-content hr::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.8em;
+  height: 0.8em;
+  background: #b98a2e;
+  clip-path: polygon(50% 0, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0 50%, 40% 40%);
+  transform: translate(-50%, -50%);
 }
 
 .anki-card-content a {
@@ -556,12 +978,12 @@ details > summary::-webkit-details-marker {
 }
 
 .anki-card-content .cloze-blank {
-  font-weight: 650;
+  font-weight: 700;
   color: var(--accent);
 }
 
 .anki-card-content .cloze-reveal {
-  font-weight: 650;
+  font-weight: 700;
   color: var(--accent);
   background: var(--accent-soft);
   border-radius: 0.3rem;
