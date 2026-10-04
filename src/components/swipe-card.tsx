@@ -31,42 +31,48 @@
 // short question or term is set as display type, as large as the card allows
 // (src/lib/flashcards/card-layout.ts); anything longer reads as a document.
 //
-// Three movements, deliberately unlike each other (timings: src/lib/motion.ts):
+// Three movements, deliberately unlike each other (timings and poses:
+// src/lib/motion.ts). Each card on the stage drives its own motion explicitly
+// rather than through mount/unmount variants, so what is on screen is always
+// a continuation of what was on screen the frame before.
 //
-// The flip — the same card, turned over. The card's shell (paper, rule, shadow
-// and the position footer) is one element that stays mounted for the life of
-// the card; only which face is painted changes. A flip turns the shell edge-on
-// about its vertical axis (rotateY 0 → 90°) under CSS perspective, so the
-// stiff card narrows to a line, swaps the painted face at the instant the
-// shell is invisible, and turns it back (-90° → 0). A shadow passes over the
-// card as it turns away from the light. Both faces stay in the DOM throughout,
-// so a flip is never a remount, a layout change or a size change, and there is
-// never a frame with mirrored text, both faces, or neither.
+// The flip — the same card, turned over. It is a real two-sided card: the
+// front and back are both mounted for the life of the card, back to back in
+// one preserve-3d container (the back pre-turned 180°, both with
+// backface-visibility: hidden), and the flip rotates that container 0 → 180°
+// under perspective set on its parent. The card passes through edge-on and
+// never changes size, never fades, never swaps DOM content. A faint shade
+// crosses the paper as it turns away from the light.
 //
-// It replaced a classic two-face 3D flip (preserve-3d, both faces rotated,
-// backface-visibility: hidden). In WebKit — the engine behind every iPhone
-// browser, Chrome included — that construction is fragile: under Playwright's
-// WebKit the back face painted mirrored on top of the front even at rest. And
-// framer-motion writes `transform: none` for an all-default transform, so every
-// flip began by creating a brand-new 3D layer, which is a classic WebKit
-// single-frame flash. Here nothing depends on backface-visibility, and the
-// shell's transform is always a 3D transform (never "none"), so its layer
-// exists before a flip starts instead of being created on its first frame.
+// WebKit (every iPhone browser) has historically been unreliable about
+// backface-visibility, so it is not trusted alone: the side turned away is
+// also marked data-painted / visibility: hidden from the very frame the turn
+// passes edge-on — written straight to the DOM from the angle's own change
+// event, not on a later React commit. Nothing that flattens 3D (overflow,
+// opacity, filters) sits on the preserve-3d container itself, and its
+// transform is always a 3D transform (never "none"), so its compositing layer
+// exists before a flip starts rather than being created on the first frame.
 //
-// Next and Previous — a different card. The card on top is moved a short way
-// aside, turning a few degrees and fading as it goes, while the card beneath
-// comes forward from the stack and settles. Next moves the card aside to the
-// right, Previous to the left, so the direction of travel through the deck
-// can be read from the motion alone. It is a hand moving a card off a stack,
-// not a slide show: nothing crosses the screen. A swiped card continues the
-// way the finger threw it (left for next, right for previous) from where it
-// was let go.
+// Next and Previous — a different card. The incoming card is mounted already
+// solid, just behind and beneath the outgoing one; the outgoing card is moved
+// a short way aside (right for Next, left for Previous), turning a few degrees
+// and staying fully solid while it moves — a translucent card would show the
+// next card's text through its own. Only once it is aside does it go: first
+// its printing fades off the still-solid paper, then the blank paper dissolves
+// over a card that is by then in place, so two texts are never legible over
+// each other. Both cards move together for the whole change, so there is never
+// a frame without a card on the stage. A
+// swiped card is not snapped back first: it continues from where the finger
+// let go, at the lean it had, the way it was thrown. A card still leaving when
+// the reader moves on again leaves at once, so the stage never holds more than
+// the card leaving and the card arriving.
 //
-// With reduced motion there is no turn and no travel: the face swaps in place
-// and cards cross-fade.
+// With reduced motion there is no turn and no travel: the side shown swaps in
+// place, and a changed card appears beneath the old one as that fades.
 
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -78,11 +84,14 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
+  PresenceContext,
   animate,
   motion,
-  useIsPresent,
   useMotionValue,
+  useMotionValueEvent,
+  usePresence,
   useTransform,
+  type AnimationPlaybackControls,
   type MotionValue,
 } from "framer-motion";
 import { Check } from "lucide-react";
@@ -95,7 +104,18 @@ import {
   displayFontSize,
   splitAnswer,
 } from "@/lib/flashcards/card-layout";
-import { NAV_TILT, TURN_IN, TURN_OUT, cardVariants, type CardMotion } from "@/lib/motion";
+import {
+  CardStage,
+  DRAG_TILT,
+  FLIP,
+  NAV,
+  RESTING,
+  SUPERSEDED,
+  enterFrom,
+  exitTo,
+  type CardMotion,
+  type Pose,
+} from "@/lib/motion";
 
 export type { CardMotion };
 import {
@@ -141,7 +161,6 @@ interface GestureState {
 
 export interface SwipeCardProps {
   card: Flashcard;
-  motionCustom: CardMotion;
   flipped: boolean;
   /** 1-based position in the current run, and the run's length. */
   position: number;
@@ -168,7 +187,6 @@ export interface SwipeCardProps {
 
 export function SwipeCard({
   card,
-  motionCustom,
   flipped,
   position,
   total,
@@ -187,12 +205,118 @@ export function SwipeCard({
   onToggleKnown,
   onInteract,
 }: SwipeCardProps) {
-  const { reduced, width } = motionCustom;
-  const isPresent = useIsPresent();
+  const stage = useContext(CardStage);
+  const { reduced, width } = stage.motion;
+  const [isPresent, safeToRemove] = usePresence();
+  // False only for the card shown when the screen opens: it is simply there.
+  const appearsInPlace = useContext(PresenceContext)?.initial === false;
 
-  const x = useMotionValue(0);
+  // ----------------------------------------------- where the card sits --
+  // Starts where it enters from — set before its first paint, so there is no
+  // frame of it at rest before it moves.
+  const [start] = useState<Pose>(() => (appearsInPlace ? RESTING : enterFrom(stage.motion)));
+  const x = useMotionValue(start.x);
+  const y = useMotionValue(start.y);
   // A dragged card leans the way it is pulled, like a card held by one edge.
-  const rotate = useMotionValue(0);
+  const rotate = useMotionValue(start.rotate);
+  const scale = useMotionValue(start.scale);
+  const opacity = useMotionValue(start.opacity);
+  const ink = useMotionValue(start.ink);
+
+  // The movement in progress. Each new one replaces it; `run` tells a
+  // superseded movement's completion from the current one's.
+  const moving = useRef<AnimationPlaybackControls[]>([]);
+  const run = useRef(0);
+  const exitGeneration = useRef<number | null>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const overtaken = useRef(false);
+
+  const stopMoving = useCallback(() => {
+    for (const controls of moving.current) controls.stop();
+    moving.current = [];
+  }, []);
+
+  const moveTo = useCallback(
+    (
+      pose: Partial<Record<keyof Pose, number | (number | null)[]>>,
+      transition: object & Partial<Record<keyof Pose, object>>,
+      then?: () => void
+    ) => {
+      stopMoving();
+      const id = ++run.current;
+      const values = { x, y, rotate, scale, opacity, ink } as const;
+      const all: AnimationPlaybackControls[] = [];
+      for (const key of Object.keys(values) as (keyof Pose)[]) {
+        const to = pose[key];
+        const value = values[key];
+        if (to === undefined) continue;
+        if (Array.isArray(to)) {
+          // Keyframes; null is "from wherever it is now".
+          const frames = to.map((v) => v ?? value.get());
+          all.push(animate(value, frames, transition[key] ?? transition));
+        } else if (value.get() !== to) {
+          all.push(animate(value, to, transition[key] ?? transition));
+        }
+      }
+      moving.current = all;
+      Promise.all(all).then(() => {
+        if (id === run.current) then?.();
+      });
+    },
+    [ink, opacity, rotate, scale, stopMoving, x, y]
+  );
+
+  useEffect(() => {
+    if (isPresent) {
+      // Arriving, or coming back after starting to leave (Next, then Previous
+      // straight away): settle into place from wherever it is now.
+      exitGeneration.current = null;
+      overtaken.current = false;
+      if (surfaceRef.current) surfaceRef.current.style.visibility = "";
+      const atRest =
+        x.get() === 0 &&
+        y.get() === 0 &&
+        rotate.get() === 0 &&
+        scale.get() === 1 &&
+        opacity.get() === 1 &&
+        ink.get() === 1;
+      if (!atRest) moveTo(RESTING, NAV);
+      return;
+    }
+    // Leaving: from exactly where it is — mid-drag, mid-arrival or at rest.
+    exitGeneration.current = stage.generation;
+    const { transition, ...target } = exitTo(stage.motion);
+    moveTo(target, transition, () => safeToRemove?.());
+    // Only presence starts a movement; the stage's later changes are handled below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPresent]);
+
+  useEffect(() => {
+    // Overtaken while still leaving: go now, so cards never pile up. The
+    // stage only removes leaving cards once the last of them has finished, so
+    // a card that has gone is also taken out of rendering until then.
+    // Overtaken twice — presses faster than any card could be read — it goes
+    // at once, so no more than three are ever drawn (arriving, leaving, and
+    // this one fading under them).
+    if (isPresent || exitGeneration.current === null) return;
+    if (stage.generation === exitGeneration.current) return;
+    const twice = overtaken.current;
+    overtaken.current = true;
+    exitGeneration.current = stage.generation;
+    const gone = () => {
+      if (surfaceRef.current) surfaceRef.current.style.visibility = "hidden";
+      safeToRemove?.();
+    };
+    if (twice) {
+      stopMoving();
+      run.current++;
+      gone();
+      return;
+    }
+    moveTo({ opacity: 0 }, SUPERSEDED, gone);
+  }, [isPresent, moveTo, safeToRemove, stage.generation, stopMoving]);
+
+  useEffect(() => stopMoving, [stopMoving]);
 
   const gesture = useRef<GestureState | null>(null);
   const [tracker] = useState(() => new VelocityTracker());
@@ -200,65 +324,62 @@ export function SwipeCard({
   const suppressClickUntil = useRef(0);
 
   // ------------------------------------------------------------- the flip --
-  const turn = useMotionValue(0);
-  const shellTransform = useTransform(turn, (deg) => `perspective(1100px) rotateY(${deg}deg)`);
-  // Shade on the card's face, deepest when it is edge-on to the light.
-  const sheen = useTransform(turn, (deg) => Math.min(1, Math.abs(deg) / 90) * 0.75);
-  const shellRef = useRef<HTMLDivElement>(null);
+  const turn = useMotionValue(flipped && !reduced ? 180 : 0);
+  // Always a 3D transform, never "none" (see the header comment).
+  const flipTransform = useTransform(turn, (deg) => `rotateY(${deg}deg)`);
+  // A faint shade on the paper, deepest edge-on to the light.
+  const shade = useTransform(turn, (deg) => Math.abs(Math.sin((deg * Math.PI) / 180)) * 0.6);
+  const flipperRef = useRef<HTMLDivElement>(null);
   const [painted, setPainted] = useState<Side>(flipped ? "back" : "front");
   const paintedRef = useRef<Side>(painted);
 
-  useEffect(() => {
-    const target: Side = flipped ? "back" : "front";
-    const paint = (side: Side) => {
-      paintedRef.current = side;
-      // Written to the DOM directly as well as through state, so the swap lands
-      // in the same frame as the jump to the far edge below rather than
-      // whenever React next commits.
-      if (shellRef.current) shellRef.current.dataset.painted = side;
-      setPainted(side);
-    };
+  const paint = useCallback((side: Side) => {
+    if (paintedRef.current === side) return;
+    paintedRef.current = side;
+    // Straight to the DOM as well as through state, so the side turned away is
+    // hidden in the same frame the turn passes edge-on, not on a later commit.
+    if (flipperRef.current) flipperRef.current.dataset.painted = side;
+    setPainted(side);
+  }, []);
 
+  useMotionValueEvent(turn, "change", (deg) => {
+    paint(Math.cos((deg * Math.PI) / 180) >= 0 ? "front" : "back");
+  });
+
+  const wasReduced = useRef(reduced);
+  useEffect(() => {
+    const target = flipped ? 180 : 0;
     if (reduced) {
+      // No turn: the shown side simply swaps.
       turn.jump(0);
-      if (paintedRef.current !== target) paint(target);
+      paint(flipped ? "back" : "front");
+      wasReduced.current = true;
       return;
     }
-
-    if (paintedRef.current === target) {
-      // Flipped back before the face swapped: turn back to flat.
-      if (turn.get() === 0) return;
-      const back = animate(turn, 0, TURN_OUT);
-      return () => back.stop();
+    if (wasReduced.current) {
+      // Motion was just allowed again: take up the current side without a turn.
+      wasReduced.current = false;
+      turn.jump(target);
+      return;
     }
-
-    let active = true;
-    let controls: ReturnType<typeof animate> | null = null;
-    const current = turn.get();
-    const edge = current < 0 ? -90 : 90;
-    const remaining = Math.max(0.25, 1 - Math.abs(current) / 90);
-    controls = animate(turn, edge, { ...TURN_IN, duration: TURN_IN.duration * remaining });
-    controls.then(() => {
-      if (!active) return;
-      paint(target);
-      turn.jump(-edge);
-      controls = animate(turn, 0, TURN_OUT);
-    });
-    return () => {
-      active = false;
-      controls?.stop();
-    };
-  }, [flipped, reduced, turn]);
+    const from = turn.get();
+    if (from === target) return;
+    // Turned back part-way through: the rest of the way, in proportion.
+    const share = Math.max(0.4, Math.abs(target - from) / 180);
+    const controls = animate(turn, target, { ...FLIP, duration: FLIP.duration * share });
+    return () => controls.stop();
+  }, [flipped, reduced, turn, paint]);
 
   // ------------------------------------------------------------- gestures --
-  function springBack(value: MotionValue<number>, velocity = 0) {
+  function springBack(velocity = 0) {
     if (reduced) {
-      animate(value, 0, { duration: 0.12 });
+      animate(x, 0, { duration: 0.12 });
       animate(rotate, 0, { duration: 0.12 });
       return;
     }
-    animate(value, 0, { type: "spring", stiffness: 520, damping: 36, velocity: velocity * 1000 });
-    animate(rotate, 0, { type: "spring", stiffness: 520, damping: 36 });
+    // Critically damped: the card settles back, it does not bounce.
+    animate(x, 0, { type: "spring", stiffness: 380, damping: 40, velocity: velocity * 1000 });
+    animate(rotate, 0, { type: "spring", stiffness: 380, damping: 40 });
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -305,7 +426,7 @@ export function SwipeCard({
       const allowed = dx < 0 ? canGoNext : canGoPrevious;
       const travel = allowed ? dx : rubberBand(dx);
       x.set(travel);
-      if (!reduced && width > 0) rotate.set((travel / width) * NAV_TILT * 1.6);
+      if (!reduced && width > 0) rotate.set((travel / width) * DRAG_TILT);
     }
   }
 
@@ -332,14 +453,14 @@ export function SwipeCard({
     });
 
     if (outcome === "next" || outcome === "previous") {
-      // The card leaves from where the finger let go; the next one comes
-      // forward from the stack beneath it.
+      // No spring back to centre: the card leaves from where the finger let
+      // go, and the next one comes forward from the stack beneath it.
       onInteract();
       onNavigate(outcome === "next" ? 1 : -1, x.get());
       return;
     }
     if (outcome === "edge") onEdge(dx < 0 ? 1 : -1);
-    springBack(x, vx);
+    springBack(vx);
   }
 
   function handlePointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
@@ -349,7 +470,7 @@ export function SwipeCard({
     // The browser took the gesture over (usually a scroll): no click follows,
     // and nothing here should act on it.
     suppressClickUntil.current = 0;
-    springBack(x);
+    springBack();
   }
 
   function handleClickCapture(event: ReactMouseEvent<HTMLDivElement>) {
@@ -385,18 +506,28 @@ export function SwipeCard({
     onToggleKnown,
   };
 
+  const sideProps = {
+    position,
+    total,
+    present: isPresent,
+    compact,
+    showPosition,
+    shade,
+    ink,
+    faceProps,
+  };
+
   return (
     <motion.div
+      ref={surfaceRef}
       data-testid="card-surface"
-      custom={motionCustom}
-      variants={cardVariants}
-      initial="enter"
-      animate="center"
-      exit="exit"
       className="card-surface absolute inset-0 cursor-pointer select-none"
       style={{
         x,
+        y,
         rotate,
+        scale,
+        opacity,
         touchAction: "pan-y",
         pointerEvents: isPresent ? "auto" : "none",
         // A card being moved aside stays on top of the one coming forward.
@@ -411,32 +542,89 @@ export function SwipeCard({
       onClick={handleClick}
       onDragStartCapture={handleDragStart}
     >
-      <motion.div
-        ref={shellRef}
-        data-testid="card-flipper"
-        data-flipped={flipped}
-        data-painted={painted}
-        data-motion={reduced ? "reduced" : "full"}
-        className="card-shell paper flex h-full w-full flex-col overflow-hidden"
-        style={{
-          transform: shellTransform,
-          ...(compact ? ({ "--radius-card": "1rem", "--paper-inset": "0.4rem" } as CSSProperties) : null),
-        }}
+      {/* Perspective lives on the parent of the turning card, which itself is
+          never transformed, so the 3D context starts here and nothing above
+          it can flatten the turn. */}
+      <div
+        className="absolute inset-0"
+        style={{ perspective: `${Math.round(Math.max(1000, width * 2.5))}px` }}
       >
+        <motion.div
+          ref={flipperRef}
+          data-testid="card-flipper"
+          data-flipped={flipped}
+          data-painted={painted}
+          data-motion={reduced ? "reduced" : "full"}
+          className="card-flipper relative h-full w-full"
+          style={{
+            transform: flipTransform,
+            ...(compact ? ({ "--radius-card": "1rem", "--paper-inset": "0.4rem" } as CSSProperties) : null),
+          }}
+        >
+          <CardSide side="front" hidden={flipped} turned={false} {...sideProps} />
+          {/* Pre-turned to face away; with reduced motion the card never
+              turns, so neither does its back. */}
+          <CardSide side="back" hidden={!flipped} turned={!reduced} {...sideProps} />
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
+
+type FaceProps = Omit<Parameters<typeof CardFace>[0], "side" | "hidden">;
+
+/** One side of the card: its own paper, its face, its position footer. */
+function CardSide({
+  side,
+  hidden,
+  turned,
+  position,
+  total,
+  present,
+  compact,
+  showPosition,
+  shade,
+  ink,
+  faceProps,
+}: {
+  side: Side;
+  hidden: boolean;
+  turned: boolean;
+  position: number;
+  total: number;
+  present: boolean;
+  compact: boolean;
+  showPosition: boolean;
+  shade: MotionValue<number>;
+  ink: MotionValue<number>;
+  faceProps: FaceProps;
+}) {
+  return (
+    <div
+      data-side={side}
+      aria-hidden={hidden || undefined}
+      className={cn(
+        "card-side paper absolute inset-0 flex flex-col overflow-hidden",
+        side === "back" && "paper-back"
+      )}
+      style={{ transform: turned ? "rotateY(180deg)" : "rotateY(0deg)" }}
+    >
+      {/* What is printed on the paper; a leaving card loses it before its paper. */}
+      <motion.div className="flex min-h-0 flex-1 flex-col" style={{ opacity: ink }}>
         <div className="relative min-h-0 flex-1">
-          <CardFace side="front" hidden={flipped} {...faceProps} />
-          <CardFace side="back" hidden={!flipped} {...faceProps} />
+          <CardFace side={side} hidden={hidden} {...faceProps} />
         </div>
         <CardPosition
           position={position}
           total={total}
-          present={isPresent}
+          // Only the side that is up names itself, so the position is found once.
+          present={present && !hidden}
           compact={compact}
           visible={showPosition}
         />
-        <motion.span aria-hidden className="card-sheen" style={{ opacity: sheen }} />
       </motion.div>
-    </motion.div>
+      <motion.span aria-hidden className="card-sheen" style={{ opacity: shade }} />
+    </div>
   );
 }
 

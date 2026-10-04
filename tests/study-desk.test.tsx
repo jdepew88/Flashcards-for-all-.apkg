@@ -22,13 +22,14 @@ import {
   splitAnswer,
 } from "@/lib/flashcards/card-layout";
 import {
+  FLIP,
   KEY_REPEAT_INTERVAL_MS,
-  NAV_IN,
-  NAV_OUT,
-  TURN_IN,
-  TURN_OUT,
+  NAV,
+  NAV_INK_FADE,
+  NAV_PAPER_FADE,
   enterFrom,
   exitTo,
+  navShift,
   type CardMotion,
 } from "@/lib/motion";
 import { useFlashcardsStore } from "@/lib/stores/known-store";
@@ -137,22 +138,59 @@ describe("the three movements are different movements", () => {
     expect(moved(exitTo({ ...base, direction: -1, offset: 90 })).x).toBeGreaterThan(90);
   });
 
-  it("with reduced motion neither travels nor turns: a short fade in place", () => {
+  it("with reduced motion neither travels nor turns: the old card fades over the new one", () => {
     const out = exitTo({ ...base, reduced: true });
     const incoming = enterFrom({ ...base, reduced: true });
 
     expect(out).toEqual({ opacity: 0, transition: { duration: 0.12 } });
-    expect(incoming).toMatchObject({ x: 0, y: 0, rotate: 0, scale: 1, opacity: 0 });
+    // Already in place and solid beneath: no frame without a card.
+    expect(incoming).toEqual({ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1, ink: 1 });
   });
 
-  it("is quick: a flip within 300–450ms, a card change within 220–350ms", () => {
-    const flip = (TURN_IN.duration + TURN_OUT.duration) * 1000;
-    expect(flip).toBeGreaterThanOrEqual(300);
-    expect(flip).toBeLessThanOrEqual(450);
-    for (const move of [NAV_IN, NAV_OUT]) {
-      expect(move.duration * 1000).toBeGreaterThanOrEqual(220);
-      expect(move.duration * 1000).toBeLessThanOrEqual(350);
-    }
+  it("is deliberate, not snappy: a flip of 450–550ms, a card change of 380–480ms", () => {
+    expect(FLIP.duration * 1000).toBeGreaterThanOrEqual(450);
+    expect(FLIP.duration * 1000).toBeLessThanOrEqual(550);
+    expect(NAV.duration * 1000).toBeGreaterThanOrEqual(380);
+    expect(NAV.duration * 1000).toBeLessThanOrEqual(480);
+  });
+
+  it("never fades a card to nothing in place: movement first, a dissolve only once aside", () => {
+    // The incoming card is revealed already solid, not faded in.
+    expect(enterFrom({ ...base, direction: 1 }).opacity).toBe(1);
+    expect(enterFrom({ ...base, direction: -1 }).opacity).toBe(1);
+
+    type Fade = { times: number[]; duration: number };
+    const out = exitTo({ ...base, direction: 1 }) as {
+      opacity: (number | null)[];
+      ink: (number | null)[];
+      scale: number;
+      transition: { duration: number; opacity: Fade; ink: Fade };
+    };
+    // Fully solid while it travels: no translucent card showing the next card's text through it.
+    expect(out.opacity).toEqual([null, 1, 0, 0]);
+    expect(out.ink).toEqual([null, 1, 0, 0]);
+    expect(NAV_PAPER_FADE[0]).toBeGreaterThanOrEqual(0.5);
+    // Its printing is gone before its paper starts to go: two texts are never legible together.
+    expect(NAV_INK_FADE[0]).toBeLessThan(NAV_INK_FADE[1]);
+    expect(NAV_INK_FADE[1]).toBeLessThanOrEqual(NAV_PAPER_FADE[0]);
+    expect(out.transition.opacity.times).toEqual([0, ...NAV_PAPER_FADE, 1]);
+    expect(out.transition.ink.times).toEqual([0, ...NAV_INK_FADE, 1]);
+    // Both fades run on the move's own clock: both cards move for all of it.
+    expect(out.transition.opacity.duration).toBe(out.transition.duration);
+    expect(out.transition.ink.duration).toBe(out.transition.duration);
+    expect(out.scale).toBeGreaterThan(0.97);
+  });
+
+  it("moves a phone-sized card 48–64px aside, not across the screen", () => {
+    expect(navShift(358)).toBeGreaterThanOrEqual(48);
+    expect(navShift(358)).toBeLessThanOrEqual(64);
+    expect(navShift(1600)).toBe(64);
+  });
+
+  it("lets a swiped card keep the lean it was thrown with", () => {
+    const thrown = moved(exitTo({ ...base, direction: 1, offset: -160 }));
+    const pressed = moved(exitTo({ ...base, direction: 1 }));
+    expect(thrown.rotate).toBeLessThan(-Math.abs(pressed.rotate));
   });
 
   it("a flip turns the card and leaves its position alone; a move leaves it unturned", async () => {
@@ -212,13 +250,50 @@ describe("one card, one side", () => {
     expect(screen.getAllByTestId("card-surface")).toHaveLength(1);
   });
 
-  it("is real cardstock: the shell carries the paper, and the back is the back of the same shell", () => {
+  it("is a real two-sided card: both sides of cardstock, mounted back to back in one turning container", () => {
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
-    const shell = screen.getByTestId("card-flipper");
+    const flipper = screen.getByTestId("card-flipper");
+    const front = flipper.querySelector<HTMLElement>(':scope > [data-side="front"]')!;
+    const back = flipper.querySelector<HTMLElement>(':scope > [data-side="back"]')!;
 
-    expect(shell).toHaveClass("paper", "card-shell");
-    expect(shell).toContainElement(face("front"));
-    expect(shell).toContainElement(face("back"));
+    expect(flipper).toHaveClass("card-flipper");
+    expect(flipper.style.transform).toBe("rotateY(0deg)");
+    for (const side of [front, back]) expect(side).toHaveClass("paper", "card-side");
+    expect(back).toHaveClass("paper-back");
+    expect(front.style.transform).toBe("rotateY(0deg)");
+    expect(back.style.transform).toBe("rotateY(180deg)");
+    expect(front).toContainElement(face("front"));
+    expect(back).toContainElement(face("back"));
+    // Perspective on the turning card's parent, not on the card.
+    expect(flipper.parentElement!.style.perspective).toMatch(/^\d+px$/);
+  });
+
+  it("turns the same elements over: nothing is remounted or replaced by a flip", async () => {
+    render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    const flipper = screen.getByTestId("card-flipper");
+    const front = face("front");
+    const back = face("back");
+
+    fireEvent.keyDown(window, { key: " " });
+    await waitFor(() => expect(flipper).toHaveAttribute("data-painted", "back"));
+    expect(flipper.style.transform).toBe("rotateY(180deg)");
+    expect(face("front")).toBe(front);
+    expect(face("back")).toBe(back);
+
+    fireEvent.keyDown(window, { key: " " });
+    await waitFor(() => expect(flipper).toHaveAttribute("data-painted", "front"));
+    expect(flipper.style.transform).toBe("rotateY(0deg)");
+    expect(screen.getByTestId("card-flipper")).toBe(flipper);
+  });
+
+  it("names the card's position once, from the side that is up", () => {
+    render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+    expect(screen.getAllByTestId("card-position")).toHaveLength(1);
+    expect(face("front").closest("[data-side]")).toContainElement(screen.getByTestId("card-position"));
+
+    fireEvent.keyDown(window, { key: " " });
+    expect(screen.getAllByTestId("card-position")).toHaveLength(1);
+    expect(face("back").closest("[data-side]")).toContainElement(screen.getByTestId("card-position"));
   });
 });
 
@@ -324,7 +399,7 @@ describe("rapid input", () => {
 
     expect(position()).toBe("Card 2 of 5");
     expect(isFlipped()).toBe(false);
-    expect(screen.getByTestId("card-flipper").style.transform).toBe("perspective(1100px) rotateY(0deg)");
+    expect(screen.getByTestId("card-flipper").style.transform).toBe("rotateY(0deg)");
   });
 });
 

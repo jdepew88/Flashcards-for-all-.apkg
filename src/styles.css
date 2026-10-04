@@ -276,8 +276,8 @@ html {
   --radius-card: 1.15rem;
   --space-panel: clamp(1.25rem, 3.4vw, 2.25rem);
   --dur-fast: 150ms;
-  --dur-flip: 380ms;
-  --dur-nav: 300ms;
+  --dur-flip: 500ms;
+  --dur-nav: 440ms;
   --ease-card: cubic-bezier(0.2, 0.75, 0.3, 1);
 }
 
@@ -672,26 +672,34 @@ html.study-mode body {
 
 /* ---------------------------------------------------------------- card -- */
 
-/* The card's shell is one layer for the card's whole life; a flip turns it
-   edge-on and swaps which face is painted (src/components/swipe-card.tsx).
-   The swap is decided here, from data-painted, so it lands in the same frame
-   as the turn reaching edge-on. Nothing relies on backface-visibility. */
-.card-shell[data-painted="back"] {
-  --paper: var(--card-back);
+/* A real two-sided card (src/components/swipe-card.tsx): both sides mounted
+   back to back in one 3D container that turns. The container carries nothing
+   that would flatten 3D (no overflow, opacity or filter); each side hides its
+   back. backface-visibility alone is not trusted in WebKit, so the side turned
+   away is also hidden from data-painted, which the card switches in the same
+   frame the turn passes edge-on. */
+.card-flipper {
+  -webkit-transform-style: preserve-3d;
+  transform-style: preserve-3d;
 }
 
-.card-shell[data-painted="front"] [data-face="back"],
-.card-shell[data-painted="back"] [data-face="front"] {
+.card-side {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.card-flipper[data-painted="front"] > [data-side="back"],
+.card-flipper[data-painted="back"] > [data-side="front"] {
   visibility: hidden;
 }
 
-/* The shading that passes over the card as it turns away from the light. */
+/* The faint shade that crosses the paper as it turns away from the light. */
 .card-sheen {
   position: absolute;
   inset: 0;
   z-index: 3;
   border-radius: inherit;
-  background: linear-gradient(100deg, rgb(20 12 4 / 20%), rgb(20 12 4 / 62%));
+  background: linear-gradient(100deg, rgb(20 12 4 / 6%), rgb(20 12 4 / 26%));
   pointer-events: none;
 }
 

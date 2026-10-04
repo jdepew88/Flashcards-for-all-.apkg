@@ -100,7 +100,7 @@ import {
   usePrefersReducedMotion,
 } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
-import { KEY_REPEAT_INTERVAL_MS } from "@/lib/motion";
+import { CardStage, KEY_REPEAT_INTERVAL_MS } from "@/lib/motion";
 import type { Flashcard, FlashcardDeck } from "@/lib/flashcards/types";
 
 function shuffleArray<T>(items: T[]): T[] {
@@ -118,6 +118,13 @@ function ownsKeyboard(target: Element): boolean {
     "input, select, textarea, option, audio, video, [contenteditable], [role='slider'], [role='radiogroup'], [role='menu'], [role='listbox'], [role='tablist'], [role='dialog'], [role='alertdialog']"
   );
 }
+
+/** The sheets fanned beneath the card on the desk, top first. */
+const DECK_STACK = [
+  { tone: "paper-tan", transform: "translate(9px, -7px) rotate(2deg)" },
+  { tone: "paper-mint", transform: "translate(-13px, 11px) rotate(-3.2deg)" },
+  { tone: "paper-blue", transform: "translate(16px, 7px) rotate(4.5deg)" },
+] as const;
 
 /** One floating control: a 44px target around a quieter 36px disc. */
 const FLOATING_BUTTON = 44;
@@ -138,6 +145,8 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const [direction, setDirection] = useState<-1 | 0 | 1>(0);
   // Where a swiped card was let go, so it leaves from there.
   const [releaseX, setReleaseX] = useState(0);
+  // Counts card changes, so a card still leaving knows when it is overtaken.
+  const [generation, setGeneration] = useState(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [immersive, setImmersive] = useState(false);
@@ -206,6 +215,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setPosition(0);
     setFlipped(false);
     setDirection(0);
+    setGeneration((g) => g + 1);
   }
 
   const total = order.length;
@@ -230,6 +240,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     () => ({ direction, width: cardWidth, reduced, offset: releaseX }),
     [direction, cardWidth, reduced, releaseX]
   );
+  const cardStage = useMemo(() => ({ generation, motion: motionCustom }), [generation, motionCustom]);
   // The desk layout: one landscape card with the rest of the deck beneath it.
   const desk = !compact && !immersive;
   const stackDepth = desk && currentCard ? Math.min(3, Math.max(0, remaining)) : 0;
@@ -345,6 +356,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     }
     setDirection(step);
     setReleaseX(fromX);
+    setGeneration((g) => g + 1);
     setPosition(next);
     setFlipped(false);
     setAnnouncement(`Card ${next + 1} of ${total}`);
@@ -365,6 +377,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   function restart() {
     setDirection(0);
     setReleaseX(0);
+    setGeneration((g) => g + 1);
     setPosition(0);
     setFlipped(false);
     if (shuffle) setShuffleNonce((n) => n + 1);
@@ -637,38 +650,32 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
             )}
           >
             {/* The rest of the deck, fanned beneath the card: silhouettes
-                only — as many as there are cards left, up to three. */}
-            {stackDepth >= 3 && (
-              <div
-                aria-hidden
-                data-testid="deck-stack"
-                className="paper paper-flat paper-blue absolute inset-0"
-                style={{ transform: "translate(16px, 7px) rotate(4.5deg)" }}
-              />
-            )}
-            {stackDepth >= 2 && (
-              <div
-                aria-hidden
-                data-testid="deck-stack"
-                className="paper paper-flat paper-mint absolute inset-0"
-                style={{ transform: "translate(-13px, 11px) rotate(-3.2deg)" }}
-              />
-            )}
-            {stackDepth >= 1 && (
-              <div
-                aria-hidden
-                data-testid="deck-stack"
-                className="paper paper-flat paper-tan absolute inset-0"
-                style={{ transform: "translate(9px, -7px) rotate(2deg)" }}
-              />
-            )}
+                only — as many as there are cards left, up to three. A sheet
+                that runs out fades away rather than vanishing. */}
+            <AnimatePresence initial={false}>
+              {DECK_STACK.slice(0, stackDepth)
+                .reverse()
+                .map((sheet) => (
+                  <motion.div
+                    key={sheet.tone}
+                    aria-hidden
+                    data-testid="deck-stack"
+                    className={cn("paper paper-flat absolute inset-0", sheet.tone)}
+                    style={{ transform: sheet.transform }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                  />
+                ))}
+            </AnimatePresence>
 
             {currentCard ? (
-              <AnimatePresence initial={false} custom={motionCustom}>
+              <CardStage.Provider value={cardStage}>
+              <AnimatePresence initial={false}>
                 <SwipeCard
                   key={currentCard.id}
                   card={currentCard}
-                  motionCustom={motionCustom}
                   flipped={flipped}
                   position={position + 1}
                   total={total}
@@ -688,6 +695,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                   onInteract={retireHint}
                 />
               </AnimatePresence>
+              </CardStage.Provider>
             ) : (
               <div className="panel absolute inset-0 flex flex-col items-center justify-center gap-3 border-dashed p-8 text-center">
                 <p className="font-display text-xl font-bold">No cards match this filter.</p>

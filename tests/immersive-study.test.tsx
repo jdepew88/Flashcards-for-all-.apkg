@@ -543,7 +543,11 @@ describe("reduced motion", () => {
     await user.click(card());
     expect(isFlipped()).toBe(true);
     await waitFor(() => expect(screen.getByTestId("card-flipper")).toHaveAttribute("data-painted", "back"));
-    expect(screen.getByTestId("card-flipper").style.transform).toBe("perspective(1100px) rotateY(0deg)");
+    // The card does not turn; its back is not pre-turned either, so it simply shows.
+    expect(screen.getByTestId("card-flipper").style.transform).toBe("rotateY(0deg)");
+    expect(screen.getByTestId("card-flipper").querySelector<HTMLElement>('[data-side="back"]')!.style.transform).toBe(
+      "rotateY(0deg)"
+    );
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
     await settle();
