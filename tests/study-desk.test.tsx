@@ -24,12 +24,16 @@ import {
 import {
   FLIP,
   KEY_REPEAT_INTERVAL_MS,
+  MOBILE_ARRIVAL,
+  MOBILE_FLIP,
+  MOBILE_RESOLVE,
   NAV,
   NAV_INK_FADE,
   NAV_PAPER_FADE,
   enterFrom,
   exitTo,
   navShift,
+  settleInto,
   type CardMotion,
 } from "@/lib/motion";
 import { useFlashcardsStore } from "@/lib/stores/known-store";
@@ -152,6 +156,40 @@ describe("the three movements are different movements", () => {
     expect(FLIP.duration * 1000).toBeLessThanOrEqual(550);
     expect(NAV.duration * 1000).toBeGreaterThanOrEqual(380);
     expect(NAV.duration * 1000).toBeLessThanOrEqual(480);
+  });
+
+  it("on phones finishes more gently, without changing the desktop timings", () => {
+    // Desktop as it was.
+    expect(FLIP).toEqual({ duration: 0.5, ease: [0.4, 0, 0.2, 1] });
+    expect(NAV).toEqual({ duration: 0.44, ease: [0.25, 0.8, 0.3, 1] });
+    // Phones: a flip of 500–560ms, a card change of 460–520ms.
+    expect(MOBILE_FLIP.duration * 1000).toBeGreaterThanOrEqual(500);
+    expect(MOBILE_FLIP.duration * 1000).toBeLessThanOrEqual(560);
+    expect(MOBILE_ARRIVAL.duration * 1000).toBeGreaterThanOrEqual(460);
+    expect(MOBILE_ARRIVAL.duration * 1000).toBeLessThanOrEqual(520);
+    // The gentle tail is the last 80–120ms, and nothing overshoots rest.
+    const tail = (1 - MOBILE_ARRIVAL.at) * MOBILE_ARRIVAL.duration * 1000;
+    expect(tail).toBeGreaterThanOrEqual(80);
+    expect(tail).toBeLessThanOrEqual(120);
+    for (const curve of [MOBILE_FLIP.ease, ...MOBILE_ARRIVAL.ease]) {
+      expect(curve[1]).toBeGreaterThanOrEqual(0);
+      expect(curve[3]).toBeLessThanOrEqual(1);
+    }
+    // Only the printing resolves, and only a hair.
+    expect(MOBILE_RESOLVE.opacity).toBeGreaterThanOrEqual(0.92);
+    expect(MOBILE_RESOLVE.lift).toBeLessThanOrEqual(2);
+  });
+
+  it("on phones brings an arriving card to within a tenth of its offset, then to rest", () => {
+    const start = enterFrom({ ...base, direction: 1 });
+    const { pose, transition } = settleInto(start);
+    expect(pose.y).toEqual([start.y, start.y * 0.1, 0]);
+    expect(pose.x[1]).toBeCloseTo(start.x * 0.1);
+    expect(pose.scale[1]).toBeCloseTo(1 - (1 - start.scale) * 0.1);
+    expect(pose.scale.at(-1)).toBe(1);
+    // The paper stays solid throughout.
+    expect(pose.opacity).toEqual([1, 1, 1]);
+    expect(transition.times).toEqual([0, MOBILE_ARRIVAL.at, 1]);
   });
 
   it("never fades a card to nothing in place: movement first, a dissolve only once aside", () => {

@@ -67,6 +67,12 @@
 // the reader moves on again leaves at once, so the stage never holds more than
 // the card leaving and the card arriving.
 //
+// On a phone (the compact layout) both finish more gently: the flip eases
+// longer into its last few degrees, an arriving card resolves its last tenth
+// of offset slowly as it is uncovered, and the new side or card's printing
+// resolves from a hair lighter and lower (MOBILE_* in src/lib/motion.ts). Wider
+// screens are untouched.
+//
 // With reduced motion there is no turn and no travel: the side shown swaps in
 // place, and a changed card appears beneath the old one as that fades.
 
@@ -108,11 +114,14 @@ import {
   CardStage,
   DRAG_TILT,
   FLIP,
+  MOBILE_FLIP,
+  MOBILE_RESOLVE,
   NAV,
   RESTING,
   SUPERSEDED,
   enterFrom,
   exitTo,
+  settleInto,
   type CardMotion,
   type Pose,
 } from "@/lib/motion";
@@ -222,6 +231,15 @@ export function SwipeCard({
   const scale = useMotionValue(start.scale);
   const opacity = useMotionValue(start.opacity);
   const ink = useMotionValue(start.ink);
+  // Phones only: a new side or card's printing, 1 = not yet resolved into
+  // place (MOBILE_RESOLVE), 0 = at rest. Always 0 on wider screens.
+  const settles = compact && !reduced;
+  const unresolved = useMotionValue(settles && start !== RESTING ? 1 : 0);
+  const printOpacity = useTransform<number, number>(
+    [ink, unresolved],
+    ([i, u]) => i * (1 - (1 - MOBILE_RESOLVE.opacity) * u)
+  );
+  const printLift = useTransform(unresolved, (u) => u * MOBILE_RESOLVE.lift);
 
   // The movement in progress. Each new one replaces it; `run` tells a
   // superseded movement's completion from the current one's.
@@ -280,7 +298,27 @@ export function SwipeCard({
         scale.get() === 1 &&
         opacity.get() === 1 &&
         ink.get() === 1;
-      if (!atRest) moveTo(RESTING, NAV);
+      if (atRest) return;
+      if (!settles) {
+        moveTo(RESTING, NAV);
+        return;
+      }
+      const { pose, transition } = settleInto({
+        x: x.get(),
+        y: y.get(),
+        rotate: rotate.get(),
+        scale: scale.get(),
+        opacity: opacity.get(),
+        ink: ink.get(),
+      });
+      moveTo(pose, transition);
+      // Its printing resolves as the arrival's tail does.
+      if (unresolved.get() > 0) {
+        animate(unresolved, 0, {
+          ...MOBILE_RESOLVE,
+          delay: transition.duration - MOBILE_RESOLVE.duration,
+        });
+      }
       return;
     }
     // Leaving: from exactly where it is — mid-drag, mid-arrival or at rest.
@@ -333,17 +371,31 @@ export function SwipeCard({
   const [painted, setPainted] = useState<Side>(flipped ? "back" : "front");
   const paintedRef = useRef<Side>(painted);
 
+  // When the turn in progress will finish (performance.now() time).
+  const turnEnds = useRef(0);
+
   const paint = useCallback((side: Side) => {
-    if (paintedRef.current === side) return;
+    if (paintedRef.current === side) return false;
     paintedRef.current = side;
     // Straight to the DOM as well as through state, so the side turned away is
     // hidden in the same frame the turn passes edge-on, not on a later commit.
     if (flipperRef.current) flipperRef.current.dataset.painted = side;
     setPainted(side);
+    return true;
   }, []);
 
   useMotionValueEvent(turn, "change", (deg) => {
-    paint(Math.cos((deg * Math.PI) / 180) >= 0 ? "front" : "back");
+    const changed = paint(Math.cos((deg * Math.PI) / 180) >= 0 ? "front" : "back");
+    // Phones: the side coming up is printed a hair unresolved from the moment
+    // it is edge-on (unseen), and resolves over the turn's last moments.
+    const left = (turnEnds.current - performance.now()) / 1000;
+    if (changed && settles && left > 0) {
+      unresolved.jump(1);
+      animate(unresolved, 0, {
+        ...MOBILE_RESOLVE,
+        delay: Math.max(0, left - MOBILE_RESOLVE.duration),
+      });
+    }
   });
 
   const wasReduced = useRef(reduced);
@@ -366,8 +418,13 @@ export function SwipeCard({
     if (from === target) return;
     // Turned back part-way through: the rest of the way, in proportion.
     const share = Math.max(0.4, Math.abs(target - from) / 180);
-    const controls = animate(turn, target, { ...FLIP, duration: FLIP.duration * share });
+    const timing = compact ? MOBILE_FLIP : FLIP;
+    const duration = timing.duration * share;
+    turnEnds.current = performance.now() + duration * 1000;
+    const controls = animate(turn, target, { ...timing, duration });
     return () => controls.stop();
+    // `compact` is read when a turn starts; a resize mid-turn need not restart it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flipped, reduced, turn, paint]);
 
   // ------------------------------------------------------------- gestures --
@@ -513,7 +570,8 @@ export function SwipeCard({
     compact,
     showPosition,
     shade,
-    ink,
+    printOpacity,
+    printLift,
     faceProps,
   };
 
@@ -584,7 +642,8 @@ function CardSide({
   compact,
   showPosition,
   shade,
-  ink,
+  printOpacity,
+  printLift,
   faceProps,
 }: {
   side: Side;
@@ -596,7 +655,8 @@ function CardSide({
   compact: boolean;
   showPosition: boolean;
   shade: MotionValue<number>;
-  ink: MotionValue<number>;
+  printOpacity: MotionValue<number>;
+  printLift: MotionValue<number>;
   faceProps: FaceProps;
 }) {
   return (
@@ -609,8 +669,9 @@ function CardSide({
       )}
       style={{ transform: turned ? "rotateY(180deg)" : "rotateY(0deg)" }}
     >
-      {/* What is printed on the paper; a leaving card loses it before its paper. */}
-      <motion.div className="flex min-h-0 flex-1 flex-col" style={{ opacity: ink }}>
+      {/* What is printed on the paper; a leaving card loses it before its
+          paper, and on a phone a new side's printing resolves into place. */}
+      <motion.div className="flex min-h-0 flex-1 flex-col" style={{ opacity: printOpacity, y: printLift }}>
         <div className="relative min-h-0 flex-1">
           <CardFace side={side} hidden={hidden} {...faceProps} />
         </div>

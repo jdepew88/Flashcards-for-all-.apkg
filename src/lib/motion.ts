@@ -11,7 +11,8 @@
 // The feel is a stiff card handled by hand: deliberate, never springy. Movement
 // carries the meaning; opacity only supports it. A card is never faded to
 // nothing in place, and there is never a frame without a card on the stage.
-// The durations mirror --dur-flip and --dur-nav in src/styles.css.
+// The durations mirror --dur-flip and --dur-nav in src/styles.css (phones:
+// the MOBILE_ timings, mirrored under the compact breakpoint there).
 
 import { createContext } from "react";
 
@@ -23,6 +24,38 @@ export const FLIP = { duration: 0.5, ease: [0.4, 0, 0.2, 1] } as const;
  * one aside, the incoming one forward from the stack.
  */
 export const NAV = { duration: 0.44, ease: [0.25, 0.8, 0.3, 1] } as const;
+
+/**
+ * Phones only (the compact layout). On a small screen the same movements read
+ * as landing abruptly, so they finish more gently. Desktop keeps FLIP and NAV.
+ *
+ * The flip passes edge-on a little sooner and spends longer settling: the new
+ * side is up earlier and eases into place rather than arriving at the end.
+ */
+export const MOBILE_FLIP = { duration: 0.54, ease: [0.3, 0.3, 0.15, 1] } as const;
+
+/**
+ * An arriving card on a phone: most of the way briskly, then the last tenth of
+ * its offset resolved slowly over the final ~110ms — while the card leaving
+ * above it uncovers it — instead of stopping dead. No overshoot.
+ */
+export const MOBILE_ARRIVAL = {
+  duration: 0.5,
+  /** Where the brisk part ends: this share of the start offset still to go… */
+  near: 0.1,
+  /** …at this share of the duration. */
+  at: 0.78,
+  ease: [
+    [0.25, 0.8, 0.4, 0.95],
+    [0.25, 0.1, 0.25, 1],
+  ],
+} as const;
+
+/**
+ * Phones only: once a new side or card is substantially in view, its printing
+ * resolves — from a hair lighter and lower to rest. The paper never fades.
+ */
+export const MOBILE_RESOLVE = { duration: 0.15, opacity: 0.95, lift: 2, ease: [0.2, 0, 0.2, 1] } as const;
 
 /** Reduced motion, and changes with no direction (filter, restart). */
 export const CROSSFADE = { duration: 0.12 } as const;
@@ -101,7 +134,27 @@ export function enterFrom({ direction, reduced }: CardMotion): Pose {
     : { x: -direction * 10, y: 10, rotate: -direction, scale: 0.97, opacity: 1, ink: 1 };
 }
 
-const between = ([from, to]: readonly [number, number]) => ({
+/**
+ * A phone's arrival into place from wherever the card is now: the brisk part
+ * to within MOBILE_ARRIVAL.near of rest, then the gentle tail.
+ */
+export function settleInto(from: Pose) {
+  const pose = {} as Record<keyof Pose, number[]>;
+  for (const key of Object.keys(RESTING) as (keyof Pose)[]) {
+    const to = RESTING[key];
+    pose[key] = [from[key], to + (from[key] - to) * MOBILE_ARRIVAL.near, to];
+  }
+  return {
+    pose,
+    transition: {
+      duration: MOBILE_ARRIVAL.duration,
+      times: [0, MOBILE_ARRIVAL.at, 1],
+      ease: MOBILE_ARRIVAL.ease.map((e) => [...e]),
+    },
+  };
+}
+
+const between =([from, to]: readonly [number, number]) => ({
   duration: NAV.duration,
   times: [0, from, to, 1],
   ease: "linear" as const,

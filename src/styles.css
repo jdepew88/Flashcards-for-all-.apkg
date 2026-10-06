@@ -281,6 +281,15 @@ html {
   --ease-card: cubic-bezier(0.2, 0.75, 0.3, 1);
 }
 
+/* Phones (COMPACT_QUERY in src/lib/use-media-query.ts): the card's movements
+   finish more gently there (MOBILE_FLIP and MOBILE_ARRIVAL in motion.ts). */
+@media (max-width: 639.98px), (max-height: 500px) and (pointer: coarse) {
+  html {
+    --dur-flip: 540ms;
+    --dur-nav: 500ms;
+  }
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
