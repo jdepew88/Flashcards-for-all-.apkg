@@ -67,11 +67,19 @@
 // the reader moves on again leaves at once, so the stage never holds more than
 // the card leaving and the card arriving.
 //
-// On a phone (the compact layout) both finish more gently: the flip eases
-// longer into its last few degrees, an arriving card resolves its last tenth
-// of offset slowly as it is uncovered, and the new side or card's printing
-// resolves from a hair lighter and lower (MOBILE_* in src/lib/motion.ts). Wider
-// screens are untouched.
+// On a phone (the compact layout) Next and Previous are a deck held in the
+// hand instead. The card a drag will uncover is put beneath the top card as
+// the drag starts — mounted, printed, in place — and the top card slides off
+// it: left for Next (uncovering the next card's right edge first), right for
+// Previous. Let go past the threshold and the top card carries on off the
+// side from where it was released, at the speed it was released; the card
+// beneath is then the top card — the same element, promoted, never re-rendered
+// into place. Let go short and the top card eases back over it, and it goes.
+// Buttons and keys make the same slide from rest. Nothing fades; the stage's
+// edge clips the card that has left. The flip also eases longer into its last
+// few degrees there, its new side's printing resolving from a hair lighter
+// and lower (MOBILE_FLIP, MOBILE_RESOLVE in src/lib/motion.ts). Wider screens
+// are untouched.
 //
 // With reduced motion there is no turn and no travel: the side shown swaps in
 // place, and a changed card appears beneath the old one as that fades.
@@ -117,11 +125,16 @@ import {
   MOBILE_FLIP,
   MOBILE_RESOLVE,
   NAV,
+  REVEAL_SPAN,
   RESTING,
+  SLIDE_RETURN,
+  SLIDE_SETTLE,
   SUPERSEDED,
   enterFrom,
   exitTo,
-  settleInto,
+  slideLean,
+  slideOff,
+  underPose,
   type CardMotion,
   type Pose,
 } from "@/lib/motion";
@@ -192,6 +205,17 @@ export interface SwipeCardProps {
   onToggleKnown: () => void;
   /** Any deliberate gesture (tap or swipe) — used to retire the first-run hint. */
   onInteract: () => void;
+  /**
+   * Phones: this is the card beneath the top one, uncovered as the top card is
+   * dragged off. It stays put, takes no input, and becomes the top card — the
+   * same element, never re-rendered into place — when the change happens.
+   */
+  under?: boolean;
+  /**
+   * Phones: the top card asks for the card that its drag is uncovering to be
+   * put beneath it (1 = next, -1 = previous, 0 = none).
+   */
+  onPeek?: (direction: -1 | 0 | 1) => void;
 }
 
 export function SwipeCard({
@@ -213,17 +237,35 @@ export function SwipeCard({
   onEdge,
   onToggleKnown,
   onInteract,
+  under = false,
+  onPeek,
 }: SwipeCardProps) {
   const stage = useContext(CardStage);
   const { reduced, width } = stage.motion;
   const [isPresent, safeToRemove] = usePresence();
   // False only for the card shown when the screen opens: it is simply there.
   const appearsInPlace = useContext(PresenceContext)?.initial === false;
+  // Phones: the hand deck (see the header comment). Wider screens keep the
+  // desk's movements.
+  const deck = compact;
+  // The top card on the stage, the one that is read and handled.
+  const onTop = isPresent && !under;
 
   // ----------------------------------------------- where the card sits --
   // Starts where it enters from — set before its first paint, so there is no
-  // frame of it at rest before it moves.
-  const [start] = useState<Pose>(() => (appearsInPlace ? RESTING : enterFrom(stage.motion)));
+  // frame of it at rest before it moves. On a phone a new card starts beneath
+  // the one leaving, a hair down, and stays there while it is uncovered.
+  const [start] = useState<Pose>(() =>
+    appearsInPlace
+      ? RESTING
+      : under
+        ? underPose(stage.reveal.get(), reduced)
+        : !deck
+          ? enterFrom(stage.motion)
+          : reduced || stage.motion.direction === 0
+            ? RESTING
+            : underPose(0)
+  );
   const x = useMotionValue(start.x);
   const y = useMotionValue(start.y);
   // A dragged card leans the way it is pulled, like a card held by one edge.
@@ -231,10 +273,11 @@ export function SwipeCard({
   const scale = useMotionValue(start.scale);
   const opacity = useMotionValue(start.opacity);
   const ink = useMotionValue(start.ink);
-  // Phones only: a new side or card's printing, 1 = not yet resolved into
-  // place (MOBILE_RESOLVE), 0 = at rest. Always 0 on wider screens.
+  // Phones only: a flip's new side's printing, 1 = not yet resolved into place
+  // (MOBILE_RESOLVE), 0 = at rest. Always 0 on wider screens, and on a card
+  // change: the card beneath is printed and complete before it is uncovered.
   const settles = compact && !reduced;
-  const unresolved = useMotionValue(settles && start !== RESTING ? 1 : 0);
+  const unresolved = useMotionValue(0);
   const printOpacity = useTransform<number, number>(
     [ink, unresolved],
     ([i, u]) => i * (1 - (1 - MOBILE_RESOLVE.opacity) * u)
@@ -284,10 +327,35 @@ export function SwipeCard({
     [ink, opacity, rotate, scale, stopMoving, x, y]
   );
 
+  // How fast a swiped card was moving when it was let go (px/ms), so a
+  // committed swipe continues at that speed rather than starting over.
+  const releaseVelocity = useRef(0);
+  // Phones: which card is beneath, as last asked of the stage, and which
+  // return to centre is the latest (a new drag supersedes it).
+  const peeking = useRef<-1 | 0 | 1>(0);
+  const returning = useRef(0);
+
   useEffect(() => {
+    // Whatever this card last asked to have beneath it belongs to its last
+    // turn on top; the stage has cleared it since.
+    peeking.current = 0;
+    if (isPresent && under) {
+      // Beneath the top card: it stays where it is. Only being uncovered
+      // (below) brings it up, a hair. A card still sliding off when it is
+      // wanted beneath again (swiped away, then straight back) slides back
+      // in under the top card rather than leaving its side of the stage bare.
+      exitGeneration.current = null;
+      overtaken.current = false;
+      if (surfaceRef.current) surfaceRef.current.style.visibility = "";
+      if (x.get() !== 0 || rotate.get() !== 0 || opacity.get() !== 1 || ink.get() !== 1) {
+        moveTo({ ...underPose(stage.reveal.get(), reduced) }, SLIDE_SETTLE);
+      }
+      return;
+    }
     if (isPresent) {
-      // Arriving, or coming back after starting to leave (Next, then Previous
-      // straight away): settle into place from wherever it is now.
+      // Arriving, promoted from beneath, or coming back after starting to
+      // leave (Next, then Previous straight away): settle into place from
+      // wherever it is now.
       exitGeneration.current = null;
       overtaken.current = false;
       if (surfaceRef.current) surfaceRef.current.style.visibility = "";
@@ -298,36 +366,44 @@ export function SwipeCard({
         scale.get() === 1 &&
         opacity.get() === 1 &&
         ink.get() === 1;
-      if (atRest) return;
-      if (!settles) {
-        moveTo(RESTING, NAV);
-        return;
-      }
-      const { pose, transition } = settleInto({
-        x: x.get(),
-        y: y.get(),
-        rotate: rotate.get(),
-        scale: scale.get(),
-        opacity: opacity.get(),
-        ink: ink.get(),
-      });
-      moveTo(pose, transition);
-      // Its printing resolves as the arrival's tail does.
-      if (unresolved.get() > 0) {
-        animate(unresolved, 0, {
-          ...MOBILE_RESOLVE,
-          delay: transition.duration - MOBILE_RESOLVE.duration,
-        });
-      }
+      if (!atRest) moveTo(RESTING, deck ? SLIDE_SETTLE : NAV);
+      return;
+    }
+    if (under) {
+      // A card beneath that is no longer wanted (the drag went back, or the
+      // other way): the top card covers it, so it simply goes.
+      stopMoving();
+      if (surfaceRef.current) surfaceRef.current.style.visibility = "hidden";
+      safeToRemove?.();
       return;
     }
     // Leaving: from exactly where it is — mid-drag, mid-arrival or at rest.
     exitGeneration.current = stage.generation;
+    if (deck) {
+      // Phones: slid off the deck, the way it was pushed or thrown.
+      const { pose, transition } = slideOff(stage.motion, releaseVelocity.current);
+      moveTo(pose, transition, () => safeToRemove?.());
+      return;
+    }
     const { transition, ...target } = exitTo(stage.motion);
     moveTo(target, transition, () => safeToRemove?.());
-    // Only presence starts a movement; the stage's later changes are handled below.
+    // Only presence (and promotion from beneath) starts a movement; the
+    // stage's later changes are handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPresent]);
+  }, [isPresent, under]);
+
+  // Phones: the top card tells the card beneath how far it is uncovered, and
+  // the card beneath comes up that much — from a hair down to level.
+  useMotionValueEvent(x, "change", (offset) => {
+    if (!deck || !onTop || width <= 0) return;
+    stage.reveal.set(Math.min(1, Math.abs(offset) / (width * REVEAL_SPAN)));
+  });
+  useMotionValueEvent(stage.reveal, "change", (reveal) => {
+    if (!isPresent || !under) return;
+    const pose = underPose(reveal, reduced);
+    y.set(pose.y);
+    scale.set(pose.scale);
+  });
 
   useEffect(() => {
     // Overtaken while still leaving: go now, so cards never pile up. The
@@ -428,20 +504,39 @@ export function SwipeCard({
   }, [flipped, reduced, turn, paint]);
 
   // ------------------------------------------------------------- gestures --
+
+  function peek(direction: -1 | 0 | 1) {
+    if (peeking.current === direction) return;
+    peeking.current = direction;
+    onPeek?.(direction);
+  }
+
   function springBack(velocity = 0) {
+    let back: AnimationPlaybackControls[];
     if (reduced) {
-      animate(x, 0, { duration: 0.12 });
-      animate(rotate, 0, { duration: 0.12 });
-      return;
+      back = [animate(x, 0, { duration: 0.12 }), animate(rotate, 0, { duration: 0.12 })];
+    } else if (deck) {
+      // Eased out, no bounce; the card beneath is covered again.
+      back = [animate(x, 0, SLIDE_RETURN), animate(rotate, 0, SLIDE_RETURN)];
+    } else {
+      // Critically damped: the card settles back, it does not bounce.
+      back = [
+        animate(x, 0, { type: "spring", stiffness: 380, damping: 40, velocity: velocity * 1000 }),
+        animate(rotate, 0, { type: "spring", stiffness: 380, damping: 40 }),
+      ];
     }
-    // Critically damped: the card settles back, it does not bounce.
-    animate(x, 0, { type: "spring", stiffness: 380, damping: 40, velocity: velocity * 1000 });
-    animate(rotate, 0, { type: "spring", stiffness: 380, damping: 40 });
+    if (!deck) return;
+    // Covered again: the card beneath is no longer needed — unless a new drag
+    // has taken the card up again in the meantime.
+    const id = ++returning.current;
+    Promise.all(back).then(() => {
+      if (id === returning.current && !gesture.current) peek(0);
+    });
   }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     suppressClickUntil.current = 0;
-    if (!isPresent || gesture.current || !event.isPrimary) return;
+    if (!onTop || gesture.current || !event.isPrimary) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     if (ownsDrag(event.target)) return;
 
@@ -453,6 +548,7 @@ export function SwipeCard({
       moved: false,
     };
     tracker.reset(event.clientX, event.clientY, performance.now());
+    returning.current++;
     x.stop();
     rotate.stop();
   }
@@ -482,8 +578,23 @@ export function SwipeCard({
     if (g.axis === "x") {
       const allowed = dx < 0 ? canGoNext : canGoPrevious;
       const travel = allowed ? dx : rubberBand(dx);
+      if (deck && travel !== 0) {
+        // The card this drag uncovers goes beneath before the top card moves
+        // off it, so no frame shows the stage bare. Past either end of the
+        // deck, the one card there is still beneath.
+        const toward = travel < 0 ? 1 : -1;
+        const exists = (d: -1 | 1) => (d === 1 ? canGoNext : canGoPrevious);
+        const away = -toward as -1 | 1;
+        peek(exists(toward) ? toward : exists(away) ? away : 0);
+      }
       x.set(travel);
-      if (!reduced && width > 0) rotate.set((travel / width) * DRAG_TILT);
+      if (reduced || width <= 0) {
+        // No lean.
+      } else if (deck) {
+        rotate.set(slideLean(travel, width));
+      } else {
+        rotate.set((travel / width) * DRAG_TILT);
+      }
     }
   }
 
@@ -511,7 +622,9 @@ export function SwipeCard({
 
     if (outcome === "next" || outcome === "previous") {
       // No spring back to centre: the card leaves from where the finger let
-      // go, and the next one comes forward from the stack beneath it.
+      // go, at the speed it was let go, and the next one comes forward from
+      // the stack beneath it (on a phone: is simply there, uncovered).
+      releaseVelocity.current = vx;
       onInteract();
       onNavigate(outcome === "next" ? 1 : -1, x.get());
       return;
@@ -541,7 +654,7 @@ export function SwipeCard({
   }
 
   function handleClick(event: ReactMouseEvent<HTMLDivElement>) {
-    if (!isPresent || ownsTap(event.target)) return;
+    if (!onTop || ownsTap(event.target)) return;
     onInteract();
     onFlip();
   }
@@ -566,7 +679,7 @@ export function SwipeCard({
   const sideProps = {
     position,
     total,
-    present: isPresent,
+    present: onTop,
     compact,
     showPosition,
     shade,
@@ -578,7 +691,9 @@ export function SwipeCard({
   return (
     <motion.div
       ref={surfaceRef}
-      data-testid="card-surface"
+      // The card beneath is not yet the card: it is found by its own name.
+      data-testid={under ? "card-under" : "card-surface"}
+      data-deck={deck ? (under ? "under" : isPresent ? "top" : "leaving") : undefined}
       className="card-surface absolute inset-0 cursor-pointer select-none"
       style={{
         x,
@@ -587,11 +702,13 @@ export function SwipeCard({
         scale,
         opacity,
         touchAction: "pan-y",
-        pointerEvents: isPresent ? "auto" : "none",
-        // A card being moved aside stays on top of the one coming forward.
-        zIndex: isPresent ? 2 : 3,
+        pointerEvents: onTop ? "auto" : "none",
+        // A card being moved aside stays on top of the one coming forward;
+        // the card beneath, beneath both.
+        zIndex: under ? 1 : isPresent ? 2 : 3,
       }}
-      aria-hidden={isPresent ? undefined : true}
+      aria-hidden={onTop ? undefined : true}
+      inert={under || undefined}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -609,7 +726,7 @@ export function SwipeCard({
       >
         <motion.div
           ref={flipperRef}
-          data-testid="card-flipper"
+          data-testid={under ? "card-under-flipper" : "card-flipper"}
           data-flipped={flipped}
           data-painted={painted}
           data-motion={reduced ? "reduced" : "full"}

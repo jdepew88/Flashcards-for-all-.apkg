@@ -57,7 +57,8 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { flushSync } from "react-dom";
+import { AnimatePresence, motion, useMotionValue } from "framer-motion";
 import {
   ArrowLeft,
   ArrowRight,
@@ -147,6 +148,10 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const [releaseX, setReleaseX] = useState(0);
   // Counts card changes, so a card still leaving knows when it is overtaken.
   const [generation, setGeneration] = useState(0);
+  // Phones: the card put beneath the top one by a drag (1 = next, -1 =
+  // previous, 0 = none), and how far the drag has uncovered it.
+  const [peek, setPeek] = useState<-1 | 0 | 1>(0);
+  const reveal = useMotionValue(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [immersive, setImmersive] = useState(false);
@@ -216,6 +221,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setFlipped(false);
     setDirection(0);
     setGeneration((g) => g + 1);
+    setPeek(0);
   }
 
   const total = order.length;
@@ -240,7 +246,13 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     () => ({ direction, width: cardWidth, reduced, offset: releaseX }),
     [direction, cardWidth, reduced, releaseX]
   );
-  const cardStage = useMemo(() => ({ generation, motion: motionCustom }), [generation, motionCustom]);
+  const cardStage = useMemo(
+    () => ({ generation, motion: motionCustom, reveal }),
+    [generation, motionCustom, reveal]
+  );
+  // Phones: the card beneath the top one while a drag uncovers it.
+  const peekIndex = compact && peek !== 0 ? order[position + peek] : undefined;
+  const peekCard: Flashcard | null = peekIndex !== undefined ? deck.cards[peekIndex] : null;
   // The desk layout: one landscape card with the rest of the deck beneath it.
   const desk = !compact && !immersive;
   const stackDepth = desk && currentCard ? Math.min(3, Math.max(0, remaining)) : 0;
@@ -359,7 +371,17 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setGeneration((g) => g + 1);
     setPosition(next);
     setFlipped(false);
+    // The card beneath (if a drag put it there) is now the top card.
+    setPeek(0);
+    reveal.set(0);
     setAnnouncement(`Card ${next + 1} of ${total}`);
+  }
+
+  // Phones: put the card a drag is uncovering beneath the top card — at once,
+  // before the top card moves off it, so the stage never shows bare.
+  function peekBeneath(step: -1 | 0 | 1) {
+    if (step === 0) reveal.set(0);
+    flushSync(() => setPeek(step));
   }
 
   function flip() {
@@ -378,6 +400,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setDirection(0);
     setReleaseX(0);
     setGeneration((g) => g + 1);
+    setPeek(0);
     setPosition(0);
     setFlipped(false);
     if (shuffle) setShuffleNonce((n) => n + 1);
@@ -673,6 +696,33 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
             {currentCard ? (
               <CardStage.Provider value={cardStage}>
               <AnimatePresence initial={false}>
+                {peekCard && (
+                  // Keyed like the card it will become, so a change promotes
+                  // this very element to the top rather than re-rendering it.
+                  <SwipeCard
+                    key={peekCard.id}
+                    under
+                    card={peekCard}
+                    flipped={false}
+                    position={position + peek + 1}
+                    total={total}
+                    canGoPrevious={position + peek > 0}
+                    canGoNext={position + peek < total - 1}
+                    known={knownSet.has(peekCard.id)}
+                    fontFamily={fontFamily}
+                    fontSize={fontSize}
+                    linkMode={cardLinks}
+                    compact={compact}
+                    controlsInset={controlsInset}
+                    showPosition={!desk}
+                    onFlip={flip}
+                    onNavigate={go}
+                    onEdge={(step) => go(step)}
+                    onToggleKnown={toggleKnown}
+                    onInteract={retireHint}
+                    onPeek={peekBeneath}
+                  />
+                )}
                 <SwipeCard
                   key={currentCard.id}
                   card={currentCard}
@@ -693,6 +743,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                   onEdge={(step) => go(step)}
                   onToggleKnown={toggleKnown}
                   onInteract={retireHint}
+                  onPeek={peekBeneath}
                 />
               </AnimatePresence>
               </CardStage.Provider>

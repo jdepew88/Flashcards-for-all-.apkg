@@ -24,16 +24,21 @@ import {
 import {
   FLIP,
   KEY_REPEAT_INTERVAL_MS,
-  MOBILE_ARRIVAL,
   MOBILE_FLIP,
   MOBILE_RESOLVE,
   NAV,
   NAV_INK_FADE,
   NAV_PAPER_FADE,
+  SLIDE,
+  SLIDE_MIN_DURATION,
+  SLIDE_RETURN,
+  UNDER_DEPTH,
   enterFrom,
   exitTo,
   navShift,
-  settleInto,
+  slideLean,
+  slideOff,
+  underPose,
   type CardMotion,
 } from "@/lib/motion";
 import { useFlashcardsStore } from "@/lib/stores/known-store";
@@ -158,38 +163,138 @@ describe("the three movements are different movements", () => {
     expect(NAV.duration * 1000).toBeLessThanOrEqual(480);
   });
 
-  it("on phones finishes more gently, without changing the desktop timings", () => {
+  it("on phones flips more gently, without changing the desktop timings", () => {
     // Desktop as it was.
     expect(FLIP).toEqual({ duration: 0.5, ease: [0.4, 0, 0.2, 1] });
     expect(NAV).toEqual({ duration: 0.44, ease: [0.25, 0.8, 0.3, 1] });
-    // Phones: a flip of 500–560ms, a card change of 460–520ms.
+    // Phones: a flip of 500–560ms, ending without overshoot.
     expect(MOBILE_FLIP.duration * 1000).toBeGreaterThanOrEqual(500);
     expect(MOBILE_FLIP.duration * 1000).toBeLessThanOrEqual(560);
-    expect(MOBILE_ARRIVAL.duration * 1000).toBeGreaterThanOrEqual(460);
-    expect(MOBILE_ARRIVAL.duration * 1000).toBeLessThanOrEqual(520);
-    // The gentle tail is the last 80–120ms, and nothing overshoots rest.
-    const tail = (1 - MOBILE_ARRIVAL.at) * MOBILE_ARRIVAL.duration * 1000;
-    expect(tail).toBeGreaterThanOrEqual(80);
-    expect(tail).toBeLessThanOrEqual(120);
-    for (const curve of [MOBILE_FLIP.ease, ...MOBILE_ARRIVAL.ease]) {
-      expect(curve[1]).toBeGreaterThanOrEqual(0);
-      expect(curve[3]).toBeLessThanOrEqual(1);
-    }
-    // Only the printing resolves, and only a hair.
+    expect(MOBILE_FLIP.ease[3]).toBeLessThanOrEqual(1);
+    // Only the printing of a flip's new side resolves, and only a hair.
     expect(MOBILE_RESOLVE.opacity).toBeGreaterThanOrEqual(0.92);
     expect(MOBILE_RESOLVE.lift).toBeLessThanOrEqual(2);
   });
 
-  it("on phones brings an arriving card to within a tenth of its offset, then to rest", () => {
-    const start = enterFrom({ ...base, direction: 1 });
-    const { pose, transition } = settleInto(start);
-    expect(pose.y).toEqual([start.y, start.y * 0.1, 0]);
-    expect(pose.x[1]).toBeCloseTo(start.x * 0.1);
-    expect(pose.scale[1]).toBeCloseTo(1 - (1 - start.scale) * 0.1);
-    expect(pose.scale.at(-1)).toBe(1);
-    // The paper stays solid throughout.
-    expect(pose.opacity).toEqual([1, 1, 1]);
-    expect(transition.times).toEqual([0, MOBILE_ARRIVAL.at, 1]);
+  describe("on a phone, the deck is held in the hand", () => {
+    const phone: CardMotion = { direction: 1, width: 358, reduced: false, offset: 0 };
+
+    it("Next slides the top card off to the left, Previous to the right, solid all the way", () => {
+      const next = slideOff({ ...phone, direction: 1 });
+      const previous = slideOff({ ...phone, direction: -1 });
+      const nx = (next.pose as { x: number }).x;
+      // Clear of a phone screen: the stage's edge clips it.
+      expect(nx).toBeLessThan(-358);
+      expect((previous.pose as { x: number }).x).toBe(-nx);
+      expect(Math.abs((next.pose as { rotate: number }).rotate)).toBeLessThanOrEqual(3);
+      // Nothing fades: the card leaves by moving.
+      expect(next.pose).not.toHaveProperty("opacity");
+      // A button press: 350–450ms.
+      expect(next.transition).toBe(SLIDE);
+      expect(SLIDE.duration * 1000).toBeGreaterThanOrEqual(350);
+      expect(SLIDE.duration * 1000).toBeLessThanOrEqual(450);
+    });
+
+    it("a thrown card carries on from where it was let go, at the speed it was let go", () => {
+      const thrown = slideOff({ ...phone, offset: -135 }, -1.2);
+      const x = (thrown.pose as { x: number }).x;
+      const { duration, ease } = thrown.transition as { duration: number; ease: number[] };
+      expect(x).toBeLessThan(-135);
+      expect(duration).toBeGreaterThanOrEqual(SLIDE_MIN_DURATION);
+      expect(duration).toBeLessThanOrEqual(SLIDE.duration);
+      // Its starting speed (the curve's starting slope × distance / duration) is the release speed.
+      const start = ((ease[1] / ease[0]) * Math.abs(x + 135)) / (duration * 1000);
+      expect(start).toBeCloseTo(1.2, 1);
+      // A slow, long drag past the threshold leaves at the button's pace.
+      expect(slideOff({ ...phone, offset: -120 }, 0).transition).toBe(SLIDE);
+    });
+
+    it("the card beneath sits a hair down until uncovered; a cancelled swipe eases back without bouncing", () => {
+      expect(underPose(0)).toEqual({ x: 0, y: UNDER_DEPTH.y, rotate: 0, scale: UNDER_DEPTH.scale, opacity: 1, ink: 1 });
+      expect(underPose(1)).toEqual({ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1, ink: 1 });
+      expect(underPose(0, true)).toEqual(underPose(1));
+      expect(UNDER_DEPTH.scale).toBeGreaterThanOrEqual(0.98);
+      expect(SLIDE_RETURN.duration * 1000).toBeGreaterThanOrEqual(180);
+      expect(SLIDE_RETURN.duration * 1000).toBeLessThanOrEqual(260);
+      expect(SLIDE_RETURN.ease[3]).toBeLessThanOrEqual(1);
+      // A small lean only.
+      expect(Math.abs(slideLean(-400, 358))).toBeLessThanOrEqual(3);
+      expect(slideLean(-60, 358)).toBeLessThan(0);
+    });
+
+    it("with reduced motion a phone's card change is a short fade over the card beneath, not a slide", () => {
+      expect(slideOff({ ...phone, reduced: true }, -2)).toEqual({ pose: { opacity: 0 }, transition: { duration: 0.12 } });
+    });
+
+    const finger = { pointerId: 7, pointerType: "touch", isPrimary: true, button: 0 };
+    const under = () => screen.queryByTestId("card-under");
+
+    it("puts the next card beneath while dragging left, and promotes that same card on release", async () => {
+      setMedia({ compact: true });
+      render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+      const top = screen.getByTestId("card-surface");
+      fireEvent.pointerDown(top, { ...finger, clientX: 200, clientY: 300 });
+      fireEvent.pointerMove(top, { ...finger, clientX: 185, clientY: 300 });
+      fireEvent.pointerMove(top, { ...finger, clientX: 120, clientY: 300 });
+
+      // Mid-drag: the next card is already mounted beneath, printed, front up.
+      const beneath = under()!;
+      expect(beneath).not.toBeNull();
+      expect(beneath).toHaveAttribute("data-deck", "under");
+      expect(beneath).toHaveAttribute("aria-hidden", "true");
+      expect(within(beneath).getByText("Front 2")).toBeInTheDocument();
+      expect(Number(beneath.style.zIndex)).toBeLessThan(Number(top.style.zIndex));
+      expect(position()).toBe("Card 1 of 5");
+
+      fireEvent.pointerUp(top, { ...finger, clientX: 120, clientY: 300 });
+      await settle();
+      // The card that was beneath is now the card: the same element, not a re-render.
+      expect(screen.getByTestId("card-surface")).toBe(beneath);
+      expect(beneath).toHaveAttribute("data-deck", "top");
+      expect(position()).toBe("Card 2 of 5");
+      expect(under()).toBeNull();
+    });
+
+    it("puts the previous card beneath while dragging right", async () => {
+      setMedia({ compact: true });
+      render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+      await settle();
+      const top = screen.getByTestId("card-surface");
+      fireEvent.pointerDown(top, { ...finger, clientX: 200, clientY: 300 });
+      fireEvent.pointerMove(top, { ...finger, clientX: 215, clientY: 300 });
+      fireEvent.pointerMove(top, { ...finger, clientX: 290, clientY: 300 });
+      const front = under()!.querySelector<HTMLElement>('[data-face="front"]')!;
+      expect(within(front).getByText("curious")).toBeInTheDocument();
+      fireEvent.pointerUp(top, { ...finger, clientX: 290, clientY: 300 });
+      await settle();
+      expect(position()).toBe("Card 1 of 5");
+    });
+
+    it("a short drag puts the top card back, and the card beneath goes once covered", async () => {
+      setMedia({ compact: true });
+      render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+      const top = screen.getByTestId("card-surface");
+      fireEvent.pointerDown(top, { ...finger, clientX: 200, clientY: 300 });
+      fireEvent.pointerMove(top, { ...finger, clientX: 188, clientY: 300 });
+      fireEvent.pointerMove(top, { ...finger, clientX: 170, clientY: 300 });
+      expect(under()).not.toBeNull();
+      fireEvent.pointerUp(top, { ...finger, clientX: 170, clientY: 300 });
+      await waitFor(() => expect(under()).toBeNull());
+      expect(screen.getByTestId("card-surface")).toBe(top);
+      expect(position()).toBe("Card 1 of 5");
+    });
+
+    it("puts nothing beneath on a larger screen: the desk keeps its own movement", () => {
+      render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
+      const top = screen.getByTestId("card-surface");
+      fireEvent.pointerDown(top, { ...finger, clientX: 200, clientY: 300 });
+      fireEvent.pointerMove(top, { ...finger, clientX: 185, clientY: 300 });
+      fireEvent.pointerMove(top, { ...finger, clientX: 120, clientY: 300 });
+      expect(under()).toBeNull();
+      expect(top).not.toHaveAttribute("data-deck");
+      fireEvent.pointerUp(top, { ...finger, clientX: 120, clientY: 300 });
+    });
   });
 
   it("never fades a card to nothing in place: movement first, a dissolve only once aside", () => {
