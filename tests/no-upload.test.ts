@@ -145,6 +145,7 @@ describe("no server-side deck storage exists", () => {
     // What it does depend on is entirely browser-side.
     expect(deps.sort()).toEqual([
       "framer-motion",
+      "gsap",
       "idb-keyval",
       "jszip",
       "lucide-react",

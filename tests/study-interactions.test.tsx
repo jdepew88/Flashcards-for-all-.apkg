@@ -237,7 +237,7 @@ describe("touch gestures on the card", () => {
     expect(isFlipped()).toBe(false);
   });
 
-  it("springs back at either end of the deck and says why", async () => {
+  it("springs back at the start of the deck and says why, and finishes the run at the end", async () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
@@ -249,7 +249,8 @@ describe("touch gestures on the card", () => {
     await settle();
     drag(card(), { dx: -150 });
     expect(counter()).toBe("4 / 4");
-    expect(await screen.findByText("That's the last card.")).toBeInTheDocument();
+    // Past the last card: the run is done, and the completion panel says so.
+    expect(await screen.findByTestId("deck-complete")).toHaveTextContent("Deck complete");
 
     await user.click(screen.getByRole("button", { name: "Restart" }));
     await settle();

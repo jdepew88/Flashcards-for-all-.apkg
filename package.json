@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "framer-motion": "^12.23.12",
+    "gsap": "^3.15.0",
     "idb-keyval": "^6.2.2",
     "jszip": "^3.10.1",
     "lucide-react": "^0.544.0",

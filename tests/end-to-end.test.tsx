@@ -69,7 +69,10 @@ describe("a parsed .apkg drives the study interface", () => {
       expect(counter()).toBe(`${i} / 6`);
     }
 
-    expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
+    // On the last card, Next becomes Finish: the run's completion panel.
+    expect(screen.queryByRole("button", { name: /next/i })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /finish/i }));
+    expect(screen.getByTestId("deck-complete")).toHaveTextContent("Deck complete");
   });
 
   it("offers the deck's Anki subdecks as chapter filters", async () => {

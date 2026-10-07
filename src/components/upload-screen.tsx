@@ -19,6 +19,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -60,6 +61,7 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StudyDirectionControl } from "@/components/study-direction-control";
 import { cn } from "@/lib/utils";
+import { animateDeckImport, animateHomepageEntrance, finishMotion } from "@/lib/gsap-motion";
 import { useInstalledDisplay } from "@/lib/display-mode";
 import { ApkgParseError, parseApkgFile } from "@/lib/flashcards/client-import";
 import {
@@ -95,6 +97,10 @@ type Pending = { kind: "one"; deck: UploadedDeckMeta } | { kind: "all" } | null;
 
 const SAMPLE_DECK_URL = "/sample-deck.apkg";
 
+// A deck just imported opens straight away, so it first appears in the
+// library when the reader comes back: that is when it settles into place, once.
+let justImported: string | null = null;
+
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /** A stable tint (1–5) per deck, so the library is easy to scan by colour too. */
@@ -119,6 +125,8 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
   const [persistence, setPersistence] = useState<PersistenceState>({ status: "unsupported" });
   const [estimate, setEstimate] = useState<StorageEstimate>({});
   const knownByDeck = useFlashcardsStore((s) => s.knownByDeck);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const libraryRef = useRef<HTMLUListElement>(null);
   // Which side cards open on, chosen before a deck is opened (Study options has it too).
   const studyDirection = useFlashcardPrefsStore((s) => s.studyDirection);
   const setStudyDirection = useFlashcardPrefsStore((s) => s.setStudyDirection);
@@ -147,6 +155,26 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
     };
   }, [refreshStorageInfo]);
 
+  // The page's first appearance, once per visit (see animateHomepageEntrance).
+  // Not cancelled on unmount: it is brief, and StrictMode's rehearsal unmount
+  // would otherwise leave it half-played.
+  useLayoutEffect(() => {
+    animateHomepageEntrance(Array.from(pageRef.current?.querySelectorAll("[data-entrance]") ?? []));
+  }, []);
+
+  useEffect(() => {
+    if (!justImported || !decks) return;
+    const tile = Array.from(libraryRef.current?.querySelectorAll<HTMLElement>("[data-slug]") ?? []).find(
+      (el) => el.dataset.slug === justImported
+    );
+    if (!tile) return;
+    justImported = null;
+    const motion = animateDeckImport(tile);
+    return () => {
+      finishMotion(motion);
+    };
+  }, [decks]);
+
   async function handleFile(file: File | undefined) {
     if (!file) return;
     setStatus({ kind: "working", message: "Reading file…" });
@@ -165,6 +193,7 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
       setDecks(await listUploadedDecks());
       await refreshStorageInfo();
       setStatus({ kind: "idle" });
+      justImported = deck.slug;
       onStudy(deck.slug);
     } catch (error) {
       const message =
@@ -252,7 +281,7 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
 
   return (
     // Clipped sideways: the title's fanned cards and stars reach past a phone's edge.
-    <div className="min-h-dvh overflow-x-clip">
+    <div ref={pageRef} className="min-h-dvh overflow-x-clip">
       <div className="page-gutter mx-auto flex min-h-dvh w-full max-w-[58rem] flex-col">
         <header
           className="flex items-center justify-between gap-3 pb-2"
@@ -280,18 +309,20 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
         <main className="flex-1 pb-10">
           {/* -------------------------------------------------------- hero -- */}
           <section className="relative pt-8 text-center sm:pt-12">
-            <HeroTitle />
+            <div data-entrance>
+              <HeroTitle />
+            </div>
 
-            <p className="mx-auto mt-9 max-w-3xl font-display text-[1.4rem] leading-snug sm:mt-12 sm:text-[1.8rem]">
+            <p data-entrance className="mx-auto mt-9 max-w-3xl font-display text-[1.4rem] leading-snug sm:mt-12 sm:text-[1.8rem]">
               Study smarter with simple, beautiful flashcards.
             </p>
-            <p className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-muted sm:text-[17px]">
+            <p data-entrance className="mx-auto mt-3 max-w-md text-[15px] leading-relaxed text-muted sm:text-[17px]">
               Import, study, and remember — all in your browser.
             </p>
           </section>
 
           {/* ------------------------------------------------------ import -- */}
-          <section id="get-started" aria-label="Import a deck" className="mt-9 scroll-mt-6 sm:mt-12">
+          <section data-entrance id="get-started" aria-label="Import a deck" className="mt-9 scroll-mt-6 sm:mt-12">
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -421,6 +452,7 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
               </div>
 
               <ul
+                ref={libraryRef}
                 aria-label="Saved decks"
                 className="mt-3 divide-y divide-panel-border rounded-2xl border border-panel-border bg-background/35"
               >
@@ -466,6 +498,7 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
 
           {/* ------------------------------------------------ how it works -- */}
           <section
+            data-entrance
             className="panel mt-6 scroll-mt-6"
             aria-labelledby="how-it-works"
             style={{ padding: "var(--space-panel)" }}
@@ -844,7 +877,7 @@ function DeckRow({
   if (deck.fileSize !== undefined) meta.push(formatBytes(deck.fileSize) ?? "");
 
   return (
-    <li className="flex items-center gap-3 px-3 py-3 first:rounded-t-2xl last:rounded-b-2xl sm:gap-4 sm:px-4">
+    <li data-slug={deck.slug} className="flex items-center gap-3 px-3 py-3 first:rounded-t-2xl last:rounded-b-2xl sm:gap-4 sm:px-4">
       <span
         aria-hidden
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl font-display text-lg font-bold"

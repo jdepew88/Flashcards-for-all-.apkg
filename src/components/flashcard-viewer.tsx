@@ -68,6 +68,7 @@ import {
   Maximize2,
   Pin,
   RefreshCw,
+  RotateCcw,
   SlidersHorizontal,
   SquarePlus,
   Star,
@@ -75,7 +76,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/primitives";
 import { Wordmark } from "@/components/ui/logo";
-import { DoodleArrow, DoodleBook, HandNote } from "@/components/ui/decor";
+import { DoodleArrow, DoodleBook, HandNote, Sparkle } from "@/components/ui/decor";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SwipeCard, type CardMotion } from "@/components/swipe-card";
 import { FlashcardOptionsSheet } from "@/components/flashcard-options-sheet";
@@ -103,6 +104,14 @@ import {
 } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 import { CardStage, KEY_REPEAT_INTERVAL_MS } from "@/lib/motion";
+import {
+  animateDeckComplete,
+  animateKnownMark,
+  animatePerfectScore,
+  animateProgressMilestone,
+  finishMotion,
+  releaseDeck,
+} from "@/lib/gsap-motion";
 import type { Flashcard, FlashcardDeck } from "@/lib/flashcards/types";
 
 function shuffleArray<T>(items: T[]): T[] {
@@ -128,13 +137,15 @@ const DECK_STACK = [
   { tone: "paper-blue", transform: "translate(16px, 7px) rotate(4.5deg)" },
 ] as const;
 
+/** The completion stars' resting state: unseen until the 100% flourish. */
+const HIDDEN = { opacity: 0 } as const;
+
 /** One floating control: a 44px target around a quieter 36px disc. */
 const FLOATING_BUTTON = 44;
 
 interface Toast {
   id: number;
   message: string;
-  restart?: boolean;
 }
 
 export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit: () => void }) {
@@ -169,8 +180,20 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const [homeScreenTip, setHomeScreenTip] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
+  // Moving on from the last card finishes the run: the completion panel is up.
+  const [finished, setFinished] = useState(false);
   const [cardWidth, setCardWidth] = useState(0);
   const stageRef = useRef<HTMLDivElement>(null);
+  // The cards (and the desk's stack), which settle a little when the run is done.
+  const deckRef = useRef<HTMLDivElement>(null);
+  const completionRef = useRef<HTMLElement>(null);
+  const scoreRef = useRef<HTMLParagraphElement>(null);
+  const ruleRef = useRef<HTMLSpanElement>(null);
+  const starsRef = useRef<HTMLSpanElement>(null);
+  const glowRef = useRef<HTMLSpanElement>(null);
+  const restartRef = useRef<HTMLButtonElement>(null);
+  const progressTrackRef = useRef<HTMLDivElement>(null);
+  const pinMarkRef = useRef<HTMLSpanElement>(null);
   const optionsTriggerRef = useRef<HTMLButtonElement>(null);
   const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
   // True while this screen holds the browser's real full screen.
@@ -205,16 +228,19 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const knownIds = useMemo(() => knownByDeck[deck.slug] ?? [], [knownByDeck, deck.slug]);
   const knownSet = useMemo(() => new Set(knownIds), [knownIds]);
 
+  // The known marks shape the run only while known cards are hidden. Otherwise
+  // marking a card must not rebuild the order, which would restart the run.
+  const hiddenKnown = hideKnown ? knownSet : null;
   const filteredIndices = useMemo(() => {
     let indices = deck.cards.map((_, i) => i);
     if (chapter !== "all") {
       indices = indices.filter((i) => deck.cards[i].chapter === chapter);
     }
-    if (hideKnown) {
-      indices = indices.filter((i) => !knownSet.has(deck.cards[i].id));
+    if (hiddenKnown) {
+      indices = indices.filter((i) => !hiddenKnown.has(deck.cards[i].id));
     }
     return indices;
-  }, [deck.cards, chapter, hideKnown, knownSet]);
+  }, [deck.cards, chapter, hiddenKnown]);
 
   const order = useMemo(
     () => (shuffle ? shuffleArray(filteredIndices) : filteredIndices),
@@ -233,6 +259,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setDirection(0);
     setGeneration((g) => g + 1);
     setPeek(0);
+    setFinished(false);
   }
 
   const total = order.length;
@@ -240,6 +267,14 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const currentCard: Flashcard | null = currentIndex !== undefined ? deck.cards[currentIndex] : null;
   const isKnownCurrent = currentCard ? knownSet.has(currentCard.id) : false;
   const remaining = total - position - 1;
+  // The run's result: how many of its cards are marked known. 100% only when
+  // every one is (rounded down, so 199 of 200 is 99%, not 100%).
+  const knownInRun = useMemo(
+    () => order.filter((i) => knownSet.has(deck.cards[i].id)).length,
+    [order, knownSet, deck.cards]
+  );
+  const score = total > 0 ? Math.floor((knownInRun * 100) / total) : 0;
+  const perfect = total > 0 && knownInRun === total;
 
   const phoneLandscape = compact && landscape;
   const buttonsMode = !compact || controlMode === "buttons";
@@ -365,16 +400,80 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     return () => window.clearTimeout(timer);
   }, [order, position, deck.cards, cardLinks]);
 
+  // ------------------------------------------------ finishing touches (GSAP) --
+  // Presentation only: React state above is the truth, and each of these runs
+  // once per real change of the state it follows. See gsap-motion.ts.
+
+  // The run is done: the deck settles, the completion panel rises, and an
+  // all-known run gets its small flourish. Put away, the deck comes back up.
+  useLayoutEffect(() => {
+    if (!finished) return;
+    const deckEl = deckRef.current;
+    const settle = animateDeckComplete({ deck: deckEl, panel: completionRef.current });
+    const flourish = perfect
+      ? animatePerfectScore({
+          score: scoreRef.current,
+          rule: ruleRef.current,
+          stars: Array.from(starsRef.current?.children ?? []),
+          glow: glowRef.current,
+          delay: 0.15,
+        })
+      : null;
+    recoverFocus(restartRef.current);
+    return () => {
+      settle?.kill();
+      flourish?.kill();
+      releaseDeck(deckEl);
+    };
+    // `perfect` cannot change while the panel is up: the cards are inert.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finished]);
+
+  // Reaching a quarter of the way through a run (25, 50, 75%), going forward:
+  // the progress line thickens for a moment. Runs too short for quarters to
+  // mean much are left alone; 100% is the completion panel's.
+  const lastPosition = useRef(position);
+  useEffect(() => {
+    const from = lastPosition.current;
+    lastPosition.current = position;
+    if (position <= from || total < 8) return;
+    const quarter = (p: number) => Math.floor(((p + 1) * 4) / total);
+    const reached = quarter(position);
+    if (reached === quarter(from) || reached < 1 || reached > 3) return;
+    const track = desk
+      ? progressTrackRef.current
+      : stageRef.current?.querySelector('[data-testid="card-position"] [data-progress-track]');
+    const pulse = animateProgressMilestone(track);
+    return () => {
+      finishMotion(pulse);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [position]);
+
+  // The Definitions-first pin is set like a marker when it changes.
+  const lastBackFirst = useRef(backFirst);
+  useEffect(() => {
+    if (lastBackFirst.current === backFirst) return;
+    lastBackFirst.current = backFirst;
+    const mark = animateKnownMark(pinMarkRef.current);
+    return () => {
+      finishMotion(mark);
+    };
+  }, [backFirst]);
+
   function go(step: 1 | -1, fromX = 0) {
+    if (finished) {
+      // The completion panel is up: Previous puts it away, back on the last card.
+      if (step < 0) closeCompletion();
+      return;
+    }
     const next = position + step;
-    if (next < 0 || next >= total) {
-      if (total > 0) {
-        setToast({
-          id: Date.now(),
-          message: step > 0 ? "That's the last card." : "This is the first card.",
-          restart: step > 0 && total > 1,
-        });
-      }
+    if (next >= total && total > 0) {
+      finish();
+      return;
+    }
+    if (next < 0) {
+      if (total > 0) setToast({ id: Date.now(), message: "This is the first card." });
       return;
     }
     setDirection(step);
@@ -401,8 +500,22 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setOpenedOnBack(backFirst);
   }
 
+  // Moving on from the last card: the run is done.
+  function finish() {
+    setPeek(0);
+    reveal.set(0);
+    setToast(null);
+    setFinished(true);
+    setAnnouncement(`Deck complete. ${knownInRun} of ${total} cards known.`);
+  }
+
+  function closeCompletion() {
+    setFinished(false);
+    setAnnouncement(`Card ${position + 1} of ${total}`);
+  }
+
   function flip() {
-    if (!currentCard) return;
+    if (!currentCard || finished) return;
     const next = !flipped;
     setFlipped(next);
     setAnnouncement(next !== openedOnBack ? "Showing answer" : "Showing question");
@@ -419,7 +532,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   }
 
   function toggleKnown() {
-    if (!currentCard) return;
+    if (!currentCard || finished) return;
     markKnown(deck.slug, currentCard.id, !isKnownCurrent);
   }
 
@@ -430,6 +543,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setPeek(0);
     setPosition(0);
     openSide();
+    setFinished(false);
     if (shuffle) setShuffleNonce((n) => n + 1);
     if (total > 0) setAnnouncement(`Card 1 of ${total}`);
   }
@@ -521,6 +635,11 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
           if (!event.repeat) toggleKnown();
           break;
         case "Escape":
+          if (finished) {
+            event.preventDefault();
+            closeCompletion();
+            break;
+          }
           if (!immersive) return;
           event.preventDefault();
           exitImmersive();
@@ -532,7 +651,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optionsOpen, helpOpen, immersive, position, total, flipped, openedOnBack, backFirst, currentCard, isKnownCurrent]);
+  }, [optionsOpen, helpOpen, immersive, position, total, flipped, openedOnBack, backFirst, currentCard, isKnownCurrent, finished, knownInRun]);
 
   const chapterName = deck.chapters.find((c) => c.id === chapter)?.name;
   const filterSummary = [
@@ -544,10 +663,13 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     .filter(Boolean)
     .join(" · ");
 
+  // On the last card, Next finishes the run (the completion panel).
+  const onLastCard = !!currentCard && position === total - 1;
   const cardControls = {
-    canPrevious: position > 0 && !!currentCard,
-    canFlip: !!currentCard,
-    canNext: position < total - 1,
+    canPrevious: !!currentCard && (position > 0 || finished),
+    canFlip: !!currentCard && !finished,
+    canNext: !!currentCard && !finished,
+    nextLabel: onLastCard ? "Finish" : "Next",
     onPrevious: () => go(-1),
     onFlip: flip,
     onNext: () => go(1),
@@ -605,7 +727,9 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                 backFirst ? "text-accent" : "text-muted hover:text-foreground"
               )}
             >
-              <Pin className={cn("h-[18px] w-[18px]", backFirst && "fill-current")} />
+              <span ref={pinMarkRef} className="inline-flex">
+                <Pin className={cn("h-[18px] w-[18px]", backFirst && "fill-current")} />
+              </span>
               <span className="hidden md:inline">Definitions first</span>
             </button>
             <button
@@ -663,7 +787,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                   <span>{knownSet.size} known</span>
                 </span>
               </div>
-              <div aria-hidden className="mt-2 h-2 overflow-hidden rounded-full bg-background/60 ring-1 ring-panel-border">
+              <div ref={progressTrackRef} aria-hidden className="mt-2 h-2 overflow-hidden rounded-full bg-background/60 ring-1 ring-panel-border">
                 <div
                   className="h-full w-full origin-left rounded-full bg-accent transition-transform duration-300 ease-out"
                   style={{ transform: `scaleX(${currentCard && total > 0 ? (position + 1) / total : 0})` }}
@@ -720,6 +844,15 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
               phoneLandscape && buttonsMode && "mx-16"
             )}
           >
+            {/* The deck: what settles when the run is finished, and is out of
+                reach (inert) while the completion panel is up. */}
+            <div
+              ref={deckRef}
+              data-testid="deck"
+              className="absolute inset-0"
+              inert={finished || undefined}
+              aria-hidden={finished || undefined}
+            >
             {/* The rest of the deck, fanned beneath the card: silhouettes
                 only — as many as there are cards left, up to three. A sheet
                 that runs out fades away rather than vanishing. */}
@@ -741,7 +874,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                 ))}
             </AnimatePresence>
 
-            {currentCard ? (
+            {currentCard && (
               <CardStage.Provider value={cardStage}>
               <AnimatePresence initial={false}>
                 {peekCard && (
@@ -795,7 +928,10 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                 />
               </AnimatePresence>
               </CardStage.Provider>
-            ) : (
+            )}
+            </div>
+
+            {!currentCard && (
               <div className="panel absolute inset-0 flex flex-col items-center justify-center gap-3 border-dashed p-8 text-center">
                 <p className="font-display text-xl font-bold">No cards match this filter.</p>
                 <p className="max-w-xs text-sm text-muted">
@@ -806,6 +942,68 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                 <Button variant="secondary" className="mt-2" onClick={clearFilters}>
                   Clear filters
                 </Button>
+              </div>
+            )}
+
+            {finished && currentCard && (
+              // The run's result, over the settled deck. The score is always
+              // in the text; the gold rule is an all-known run's, motion or not.
+              <div className="absolute inset-0 z-30 flex items-center justify-center p-4">
+                <section
+                  ref={completionRef}
+                  aria-labelledby="deck-complete-title"
+                  data-testid="deck-complete"
+                  data-perfect={perfect}
+                  className="relative w-full max-w-[22rem] overflow-hidden rounded-3xl border border-border bg-surface-elevated px-6 py-5 text-center shadow-float sm:py-6"
+                >
+                  <span
+                    ref={glowRef}
+                    aria-hidden
+                    data-testid="completion-glow"
+                    className="completion-glow pointer-events-none absolute inset-0 opacity-0"
+                  />
+                  <h2 id="deck-complete-title" className="eyebrow relative">
+                    Deck complete
+                  </h2>
+                  <div className="relative mx-auto mt-2 w-fit">
+                    <p
+                      ref={scoreRef}
+                      data-testid="completion-score"
+                      className="inline-block font-display text-[clamp(2.5rem,9vh,3.25rem)] font-bold leading-none tabular-nums"
+                    >
+                      {score}%
+                    </p>
+                    {perfect && (
+                      <span ref={starsRef} aria-hidden data-testid="completion-stars">
+                        <Sparkle className="absolute -left-4 top-0 h-3 w-3 text-gold" style={HIDDEN} />
+                        <Sparkle className="absolute -right-5 top-1 h-3.5 w-3.5 text-gold" style={HIDDEN} />
+                        <Sparkle className="absolute -right-2 -bottom-1 h-2.5 w-2.5 text-gold" style={HIDDEN} />
+                        <Sparkle className="absolute -left-2.5 bottom-0.5 h-2 w-2 text-gold" style={HIDDEN} />
+                      </span>
+                    )}
+                  </div>
+                  {perfect && (
+                    <span
+                      ref={ruleRef}
+                      aria-hidden
+                      data-testid="completion-rule"
+                      className="relative mx-auto mt-3 block h-[2px] w-16 rounded-full bg-gold"
+                    />
+                  )}
+                  <p className="relative mt-3 text-[15px] text-muted">
+                    {perfect ? "Every card known" : `${knownInRun} of ${total} cards known`}
+                    {perfect && <span className="sr-only"> ({total} of {total})</span>}
+                  </p>
+                  <div className="relative mt-4 grid grid-cols-2 gap-2">
+                    <Button variant="secondary" className="px-3" onClick={closeCompletion}>
+                      Back to cards
+                    </Button>
+                    <Button ref={restartRef} className="px-3" onClick={restart}>
+                      <RotateCcw className="h-4 w-4" />
+                      Restart
+                    </Button>
+                  </div>
+                </section>
               </div>
             )}
 
@@ -866,18 +1064,6 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                   exit={{ opacity: 0, y: 8, transition: { duration: 0.15 } }}
                 >
                   <span className="py-1">{toast.message}</span>
-                  {toast.restart && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        restart();
-                        setToast(null);
-                      }}
-                      className="min-h-9 rounded-full bg-background/15 px-3 py-1 text-sm font-semibold hover:bg-background/25"
-                    >
-                      Restart
-                    </button>
-                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -938,7 +1124,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                 <RailButton label="Flip" primary onClick={cardControls.onFlip} disabled={!cardControls.canFlip}>
                   <RefreshCw className="h-5 w-5" />
                 </RailButton>
-                <RailButton label="Next" onClick={cardControls.onNext} disabled={!cardControls.canNext}>
+                <RailButton label={cardControls.nextLabel} onClick={cardControls.onNext} disabled={!cardControls.canNext}>
                   <ArrowRight className="h-5 w-5" />
                 </RailButton>
               </div>
@@ -978,7 +1164,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                 Flip
               </Button>
               <Button variant="secondary" size="lg" onClick={cardControls.onNext} disabled={!cardControls.canNext}>
-                Next
+                {cardControls.nextLabel}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </nav>
@@ -1014,7 +1200,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
               Flip
             </Button>
             <Button variant="secondary" onClick={cardControls.onNext} disabled={!cardControls.canNext}>
-              Next
+              {cardControls.nextLabel}
             </Button>
           </div>
         ) : null}

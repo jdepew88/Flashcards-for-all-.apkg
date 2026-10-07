@@ -448,6 +448,16 @@ html.theme-transition *::after {
   opacity: var(--sparkle-opacity);
 }
 
+/* The faint warm light behind an all-known score. Unseen at rest; only its
+   opacity is animated, once (gsap-motion.ts, animatePerfectScore). */
+.completion-glow {
+  background: radial-gradient(
+    60% 55% at 50% 38%,
+    color-mix(in srgb, var(--gold) 20%, transparent),
+    transparent 72%
+  );
+}
+
 @keyframes twinkle {
   0%,
   100% {

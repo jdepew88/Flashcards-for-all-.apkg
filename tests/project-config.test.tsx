@@ -201,7 +201,7 @@ describe("responsive contract", () => {
 
   it("caps the card's width so lines stay readable on wide screens", () => {
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
-    const stage = screen.getByTestId("card-surface").parentElement!;
+    const stage = screen.getByTestId("study-stage");
 
     expect(stage.className).toContain("w-full");
     expect(stage.className).toContain("max-w-[40rem]");

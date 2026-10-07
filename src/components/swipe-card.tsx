@@ -111,6 +111,7 @@ import {
 import { Check } from "lucide-react";
 import { Ornament, Sparkle } from "@/components/ui/decor";
 import { cn } from "@/lib/utils";
+import { animateKnownMark, finishMotion } from "@/lib/gsap-motion";
 import { renderCardHtml, type CardLinkMode } from "@/lib/flashcards/card-links";
 import {
   briefFontSize,
@@ -841,7 +842,11 @@ function CardPosition({
       <span aria-hidden data-testid={present ? "card-position-current" : undefined} className="text-left">
         {position}
       </span>
-      <span aria-hidden className="h-[3px] min-w-6 flex-1 overflow-hidden rounded-full bg-surface-muted">
+      <span
+        aria-hidden
+        data-progress-track
+        className="h-[3px] min-w-6 flex-1 overflow-hidden rounded-full bg-surface-muted"
+      >
         <span
           className="block h-full w-full origin-left rounded-full bg-accent/55"
           style={{ transform: `scaleX(${progress})` }}
@@ -1005,6 +1010,19 @@ function CardFace({
 }
 
 function KnownToggle({ known, onToggle }: { known: boolean; onToggle: () => void }) {
+  // The check is set like a marker when the card is marked or unmarked —
+  // only on that change, never when a card arrives already known.
+  const markRef = useRef<HTMLSpanElement>(null);
+  const wasKnown = useRef(known);
+  useEffect(() => {
+    if (wasKnown.current === known) return;
+    wasKnown.current = known;
+    const motion = animateKnownMark(markRef.current);
+    return () => {
+      finishMotion(motion);
+    };
+  }, [known]);
+
   return (
     <button
       type="button"
@@ -1019,7 +1037,9 @@ function KnownToggle({ known, onToggle }: { known: boolean; onToggle: () => void
           : "border-border-strong/45 text-muted hover:border-border-strong hover:text-foreground"
       )}
     >
-      <Check className="h-3.5 w-3.5" strokeWidth={known ? 3 : 2.25} />
+      <span ref={markRef} data-testid="known-mark" className="inline-flex">
+        <Check className="h-3.5 w-3.5" strokeWidth={known ? 3 : 2.25} />
+      </span>
       {known ? "Known" : "Mark known"}
     </button>
   );

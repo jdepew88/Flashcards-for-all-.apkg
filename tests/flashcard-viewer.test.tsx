@@ -154,7 +154,7 @@ describe("navigation", () => {
     expect(counter()).toBe("1 / 4");
   });
 
-  it("disables Previous on the first card and Next on the last", async () => {
+  it("disables Previous on the first card, and turns Next into Finish on the last", async () => {
     const user = userEvent.setup();
     render(<FlashcardViewer deck={deck} onExit={vi.fn()} />);
 
@@ -164,7 +164,8 @@ describe("navigation", () => {
       await user.click(screen.getByRole("button", { name: /next/i }));
     }
     expect(counter()).toBe("4 / 4");
-    expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /next/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /finish/i })).toBeEnabled();
   });
 
   it("does not run past either end with the keyboard", () => {
