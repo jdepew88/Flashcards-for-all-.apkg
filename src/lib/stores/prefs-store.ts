@@ -10,6 +10,10 @@
 // leaves the device. New fields fall back to their defaults for anyone whose
 // stored preferences predate them (persist merges stored over initial state).
 //
+// The study direction is which side a card opens on when it becomes the
+// current card. It never changes a card: front stays front, back stays back,
+// and Flip still turns any card either way.
+//
 // Cards are set in the display serif by default, to match the cardstock look.
 
 import { create } from "zustand";
@@ -24,6 +28,9 @@ export const DEFAULT_FONT_SIZE = 19;
 /** Phone-sized screens only. Larger layouts always show buttons. */
 export type ControlMode = "gestures" | "buttons";
 
+/** Which side a card opens on: the word (front) or the definition (back). */
+export type StudyDirection = "front-first" | "back-first";
+
 interface FlashcardPrefsState {
   font: FlashcardFontId;
   fontSize: number;
@@ -32,12 +39,14 @@ interface FlashcardPrefsState {
   /** Links inside imported card content. Off by default: see card-links.ts. */
   cardLinks: CardLinkMode;
   homeScreenTipSeen: boolean;
+  studyDirection: StudyDirection;
   setFont: (font: FlashcardFontId) => void;
   setFontSize: (size: number) => void;
   setControlMode: (mode: ControlMode) => void;
   markGestureHintSeen: () => void;
   setCardLinks: (mode: CardLinkMode) => void;
   markHomeScreenTipSeen: () => void;
+  setStudyDirection: (direction: StudyDirection) => void;
 }
 
 export const useFlashcardPrefsStore = create<FlashcardPrefsState>()(
@@ -49,6 +58,7 @@ export const useFlashcardPrefsStore = create<FlashcardPrefsState>()(
       gestureHintSeen: false,
       cardLinks: "disabled",
       homeScreenTipSeen: false,
+      studyDirection: "front-first",
       setFont: (font) => set({ font }),
       setFontSize: (size) =>
         set({ fontSize: Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size)) }),
@@ -56,6 +66,7 @@ export const useFlashcardPrefsStore = create<FlashcardPrefsState>()(
       markGestureHintSeen: () => set({ gestureHintSeen: true }),
       setCardLinks: (cardLinks) => set({ cardLinks }),
       markHomeScreenTipSeen: () => set({ homeScreenTipSeen: true }),
+      setStudyDirection: (studyDirection) => set({ studyDirection }),
     }),
     {
       name: "flashcard-prefs-v1",

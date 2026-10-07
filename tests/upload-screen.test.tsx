@@ -22,6 +22,7 @@ import {
   saveUploadedDeck,
 } from "@/lib/flashcards/uploaded-decks";
 import { deleteAllDeckProgress, useFlashcardsStore } from "@/lib/stores/known-store";
+import { useFlashcardPrefsStore } from "@/lib/stores/prefs-store";
 import type { FlashcardDeck } from "@/lib/flashcards/types";
 
 const WASM_PATH = resolve(process.cwd(), "node_modules/sql.js/dist/sql-wasm.wasm");
@@ -239,6 +240,26 @@ describe("importing a deck", () => {
 
     await user.click((await library()).getByRole("button", { name: "Study" }));
     expect(onStudy).toHaveBeenCalledWith("upload-x");
+  });
+
+  it("offers the study direction before a deck is opened: Word → Definition unless changed", async () => {
+    useFlashcardPrefsStore.setState({ studyDirection: "front-first" });
+    await saveUploadedDeck({ deck: deckFixture("upload-x", "Vocab"), media: new Map() });
+    const user = userEvent.setup();
+    render(<UploadScreen onStudy={vi.fn()} />);
+
+    await screen.findByText("Vocab");
+    const group = within(screen.getByRole("group", { name: "Study direction" }));
+    const wordFirst = group.getByRole("button", { name: "Word to Definition" });
+    const definitionFirst = group.getByRole("button", { name: "Definition to Word" });
+    expect(wordFirst).toHaveAttribute("aria-pressed", "true");
+    expect(definitionFirst).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(definitionFirst);
+    expect(definitionFirst).toHaveAttribute("aria-pressed", "true");
+    expect(wordFirst).toHaveAttribute("aria-pressed", "false");
+    expect(useFlashcardPrefsStore.getState().studyDirection).toBe("back-first");
+    useFlashcardPrefsStore.setState({ studyDirection: "front-first" });
   });
 
   it("shows how much of a deck is already known", async () => {

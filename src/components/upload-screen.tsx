@@ -58,6 +58,7 @@ import {
   Sparkle,
 } from "@/components/ui/decor";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { StudyDirectionControl } from "@/components/study-direction-control";
 import { cn } from "@/lib/utils";
 import { useInstalledDisplay } from "@/lib/display-mode";
 import { ApkgParseError, parseApkgFile } from "@/lib/flashcards/client-import";
@@ -75,6 +76,7 @@ import {
   deleteDeckProgress,
   useFlashcardsStore,
 } from "@/lib/stores/known-store";
+import { useFlashcardPrefsStore } from "@/lib/stores/prefs-store";
 import {
   formatBytes,
   readPersistenceState,
@@ -117,6 +119,9 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
   const [persistence, setPersistence] = useState<PersistenceState>({ status: "unsupported" });
   const [estimate, setEstimate] = useState<StorageEstimate>({});
   const knownByDeck = useFlashcardsStore((s) => s.knownByDeck);
+  // Which side cards open on, chosen before a deck is opened (Study options has it too).
+  const studyDirection = useFlashcardPrefsStore((s) => s.studyDirection);
+  const setStudyDirection = useFlashcardPrefsStore((s) => s.setStudyDirection);
 
   const refreshStorageInfo = useCallback(async () => {
     setPersistence(await readPersistenceState());
@@ -408,6 +413,11 @@ export function UploadScreen({ onStudy }: { onStudy: (slug: string) => void }) {
                   Your decks
                 </h2>
                 <span className="text-xs text-muted">Saved in this browser</span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-2 sm:px-1">
+                <p className="text-[13px] font-medium text-muted">Study direction</p>
+                <StudyDirectionControl small value={studyDirection} onChange={setStudyDirection} />
               </div>
 
               <ul

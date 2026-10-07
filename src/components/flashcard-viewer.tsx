@@ -12,7 +12,7 @@
 //     options. Everything secondary, including Back to your decks, is in the
 //     Study options sheet.
 //   * Tablet / desktop: the study desk. A slim top bar (back, the wordmark,
-//     full screen, theme, options), a deck panel (title, what is being
+//     full screen, theme, a "Definitions first" pin, options), a deck panel (title, what is being
 //     studied, "Card 3 of 5" with its progress, how many are known), then one
 //     large card with the rest of the deck fanned beneath it, and a control
 //     panel: Previous / Flip / Next with the keyboard hints. Here the card's
@@ -66,6 +66,7 @@ import {
   ChevronRight,
   Lightbulb,
   Maximize2,
+  Pin,
   RefreshCw,
   SlidersHorizontal,
   SquarePlus,
@@ -141,8 +142,18 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   const [hideKnown, setHideKnown] = useState(false);
   const [shuffle, setShuffle] = useState(false);
   const [shuffleNonce, setShuffleNonce] = useState(0);
+  const studyDirection = useFlashcardPrefsStore((s) => s.studyDirection);
+  const setStudyDirection = useFlashcardPrefsStore((s) => s.setStudyDirection);
+  // The side a card opens on when it becomes the current card. Changing it
+  // leaves the card already up as it is; the next card follows it.
+  const backFirst = studyDirection === "back-first";
   const [position, setPosition] = useState(0);
-  const [flipped, setFlipped] = useState(false);
+  // `flipped` is which side is up (true = the back). `openedOnBack` is the
+  // side the current card opened on, so "the answer is showing" stays right
+  // whichever way round the reader is studying.
+  const [flipped, setFlipped] = useState(backFirst);
+  const [openedOnBack, setOpenedOnBack] = useState(backFirst);
+  const answerUp = flipped !== openedOnBack;
   const [direction, setDirection] = useState<-1 | 0 | 1>(0);
   // Where a swiped card was let go, so it leaves from there.
   const [releaseX, setReleaseX] = useState(0);
@@ -218,7 +229,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
   if (order !== lastOrder) {
     setLastOrder(order);
     setPosition(0);
-    setFlipped(false);
+    openSide();
     setDirection(0);
     setGeneration((g) => g + 1);
     setPeek(0);
@@ -370,7 +381,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setReleaseX(fromX);
     setGeneration((g) => g + 1);
     setPosition(next);
-    setFlipped(false);
+    openSide();
     // The card beneath (if a drag put it there) is now the top card.
     setPeek(0);
     reveal.set(0);
@@ -384,11 +395,27 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     flushSync(() => setPeek(step));
   }
 
+  // A card becoming the current one opens on the side the study direction says.
+  function openSide() {
+    setFlipped(backFirst);
+    setOpenedOnBack(backFirst);
+  }
+
   function flip() {
     if (!currentCard) return;
     const next = !flipped;
     setFlipped(next);
-    setAnnouncement(next ? "Showing answer" : "Showing question");
+    setAnnouncement(next !== openedOnBack ? "Showing answer" : "Showing question");
+  }
+
+  function changeStudyDirection(direction: typeof studyDirection) {
+    if (direction === studyDirection) return;
+    setStudyDirection(direction);
+    setAnnouncement(
+      direction === "back-first"
+        ? "Definitions first, from the next card"
+        : "Words first, from the next card"
+    );
   }
 
   function toggleKnown() {
@@ -402,7 +429,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     setGeneration((g) => g + 1);
     setPeek(0);
     setPosition(0);
-    setFlipped(false);
+    openSide();
     if (shuffle) setShuffleNonce((n) => n + 1);
     if (total > 0) setAnnouncement(`Card 1 of ${total}`);
   }
@@ -505,13 +532,14 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optionsOpen, helpOpen, immersive, position, total, flipped, currentCard, isKnownCurrent]);
+  }, [optionsOpen, helpOpen, immersive, position, total, flipped, openedOnBack, backFirst, currentCard, isKnownCurrent]);
 
   const chapterName = deck.chapters.find((c) => c.id === chapter)?.name;
   const filterSummary = [
     chapter !== "all" ? chapterName : null,
     shuffle ? "Shuffled" : null,
     hideKnown ? "Hiding known" : null,
+    backFirst ? "Definition first" : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -560,6 +588,26 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
               <Maximize2 className="h-[18px] w-[18px]" />
             </button>
             <ThemeToggle className="h-11 w-11" />
+            {/* Pins the definition as the side every new card opens on. */}
+            <button
+              type="button"
+              onClick={() => changeStudyDirection(backFirst ? "front-first" : "back-first")}
+              aria-pressed={backFirst}
+              aria-label="Keep definitions first"
+              title={
+                backFirst
+                  ? "Definitions first: new cards open on the definition. Click to open on the word again."
+                  : "Keep definitions first: new cards open on the definition."
+              }
+              data-testid="pin-direction"
+              className={cn(
+                "inline-flex h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-full px-2.5 text-sm font-medium transition-[background-color,color,transform] duration-150 hover:bg-control active:scale-95",
+                backFirst ? "text-accent" : "text-muted hover:text-foreground"
+              )}
+            >
+              <Pin className={cn("h-[18px] w-[18px]", backFirst && "fill-current")} />
+              <span className="hidden md:inline">Definitions first</span>
+            </button>
             <button
               ref={optionsTriggerRef}
               type="button"
@@ -648,13 +696,13 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
               <div className="absolute right-[calc(50%+22.75rem)] top-[10%] hidden w-40 -rotate-6 flex-col items-end xl:flex">
                 <DoodleArrow className="mr-6 h-7 w-14 text-hand opacity-70" />
                 <HandNote className="mt-1 text-right">
-                  {flipped ? "Did you have it?" : "Think of the answer…"}
+                  {answerUp ? "Did you have it?" : "Think of the answer…"}
                 </HandNote>
               </div>
               <div className="absolute left-[calc(50%+22.75rem)] top-[58%] hidden w-40 rotate-3 flex-col items-start xl:flex">
                 <DoodleArrow flip className="ml-2 h-7 w-14 text-hand opacity-70" />
                 <HandNote className="mt-1">
-                  {flipped ? "Flip back any time" : "Flip to see the answer"}
+                  {answerUp ? "Flip back any time" : "Flip to see the answer"}
                 </HandNote>
               </div>
             </>
@@ -703,7 +751,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
                     key={peekCard.id}
                     under
                     card={peekCard}
-                    flipped={false}
+                    flipped={backFirst}
                     position={position + peek + 1}
                     total={total}
                     canGoPrevious={position + peek > 0}
@@ -974,7 +1022,7 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
         {showHeader && (
           <p className="study-tip panel mx-auto mt-3 flex w-full max-w-[40rem] shrink-0 items-center gap-3 rounded-2xl px-4 py-2.5 text-sm text-muted">
             <Lightbulb aria-hidden className="h-[18px] w-[18px] shrink-0 text-gold" />
-            {flipped
+            {answerUp
               ? "Knew it? Mark it known on the card, then move on to the next one."
               : "Take your time. Read the card, think of the answer, then turn it over."}
           </p>
@@ -1004,6 +1052,8 @@ export function FlashcardViewer({ deck, onExit }: { deck: FlashcardDeck; onExit:
           restart();
           setOptionsOpen(false);
         }}
+        studyDirection={studyDirection}
+        onStudyDirectionChange={changeStudyDirection}
         immersive={immersive}
         onToggleImmersive={() => {
           setOptionsOpen(false);

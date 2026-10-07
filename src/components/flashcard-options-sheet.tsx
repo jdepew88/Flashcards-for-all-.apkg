@@ -2,7 +2,7 @@
 //
 // Started as CCNA Practice Labs' flashcard-options-sheet.tsx (font, text size,
 // exit). It now also holds what used to be a toolbar above the card — chapter
-// filter, shuffle, hide-known, restart — plus the screen (full screen, theme,
+// filter, shuffle, hide-known, restart — plus which side cards open on, the screen (full screen, theme,
 // Add to Home Screen), how phone-sized screens are operated, what links inside
 // cards do, and the keyboard shortcuts. Moving them here is what lets the
 // study screen give the card nearly all of its space: on a phone, and in
@@ -27,6 +27,7 @@ import {
   Minus,
   Moon,
   MousePointerClick,
+  Pin,
   Plus,
   RotateCcw,
   Shuffle,
@@ -39,7 +40,13 @@ import { cn } from "@/lib/utils";
 import { trapFocus } from "@/lib/focus";
 import { useTheme } from "@/lib/theme";
 import { FLASHCARD_FONTS, type FlashcardFontId } from "@/lib/fonts";
-import { MAX_FONT_SIZE, MIN_FONT_SIZE, type ControlMode } from "@/lib/stores/prefs-store";
+import { StudyDirectionControl } from "@/components/study-direction-control";
+import {
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
+  type ControlMode,
+  type StudyDirection,
+} from "@/lib/stores/prefs-store";
 import type { CardLinkMode } from "@/lib/flashcards/card-links";
 import type { FlashcardDeck } from "@/lib/flashcards/types";
 
@@ -68,6 +75,8 @@ export interface FlashcardOptionsSheetProps {
   onHideKnownChange: (hide: boolean) => void;
   knownCount: number;
   onRestart: () => void;
+  studyDirection: StudyDirection;
+  onStudyDirectionChange: (direction: StudyDirection) => void;
   immersive: boolean;
   onToggleImmersive: () => void;
   /** An iPhone tab: the Home Screen is the only way to lose the browser chrome. */
@@ -231,6 +240,8 @@ function OptionsBody({
   onHideKnownChange,
   knownCount,
   onRestart,
+  studyDirection,
+  onStudyDirectionChange,
   immersive,
   onToggleImmersive,
   offerHomeScreen,
@@ -328,6 +339,19 @@ function OptionsBody({
           <RotateCcw className="h-4 w-4" />
           Restart deck
         </Button>
+      </Section>
+
+      <Section title="Study direction">
+        <StudyDirectionControl value={studyDirection} onChange={onStudyDirectionChange} />
+        <p className="mt-2 flex gap-2 px-1 text-[13px] leading-relaxed text-muted">
+          <Pin aria-hidden className="mt-[3px] h-3.5 w-3.5 shrink-0 text-accent" />
+          <span>
+            {studyDirection === "back-first"
+              ? "Kept until you switch back: every new card opens on the definition. Flip still turns any card over."
+              : "Every new card opens on the word. Flip still turns any card over."}{" "}
+            The card you are on stays as it is.
+          </span>
+        </p>
       </Section>
 
       {showControlMode && (
